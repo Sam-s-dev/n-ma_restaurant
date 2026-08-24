@@ -1,7 +1,7 @@
 # =============================================================
 # API de gestion de restaurant — image de production
-# Contexte de build attendu : la racine du dépôt (le dossier
-# `database/` doit être copié dans l'image avec le code).
+# Ce fichier vit à la racine parce que la construction a besoin de voir
+# `backend/` ET `database/` : les migrations SQL sont embarquées dans l'image.
 # =============================================================
 
 # ---------- Étape 1 : compilation TypeScript ----------

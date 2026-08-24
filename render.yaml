@@ -24,7 +24,7 @@ services:
     plan: free
     region: frankfurt
     # Le Dockerfile attend la racine du dépôt comme contexte de build.
-    dockerfilePath: ./backend/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
     envVars:

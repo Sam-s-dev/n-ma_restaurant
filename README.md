@@ -19,6 +19,7 @@ passent sur les conteneurs Docker (`npm run smoke`).
 ```
 app restaurant/
 ├── Cahier_des_charges_App_Restaurant.md
+├── Dockerfile                    # image de production (contexte = racine)
 ├── docker-compose.yml            # PostgreSQL + API en local
 ├── render.yaml                   # déploiement Render
 ├── .env.example                  # variables de docker-compose
@@ -29,7 +30,6 @@ app restaurant/
 │   └── migrations/               # 14 migrations SQL versionnées
 │
 └── backend/
-    ├── Dockerfile                # image de production multi-étapes
     ├── scripts/smoke-test.ts     # test de bout en bout
     └── src/
         ├── index.ts              # démarrage, migrations, arrêt propre

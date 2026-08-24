@@ -35,7 +35,7 @@ services:
     build:
       # Contexte à la racine : l'image embarque backend/ ET database/.
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     container_name: restaurant_api
     restart: unless-stopped
     depends_on:
