@@ -1,9 +1,14 @@
 # =============================================================
 # Déploiement sur Render (Blueprint)
-# Render lit ce fichier et crée la base + le service API.
-#   1. Pousser le dépôt sur GitHub
-#   2. Render → New → Blueprint → sélectionner le dépôt
-#   3. Renseigner SEED_SUPERADMIN_EMAIL / SEED_SUPERADMIN_PASSWORD
+# Render lit ce fichier et crée la base PostgreSQL + le service API.
+#
+#   1. Render → New → Blueprint → choisir le dépôt GitHub
+#   2. Renseigner SEED_SUPERADMIN_EMAIL et SEED_SUPERADMIN_PASSWORD
+#   3. Apply — c'est tout.
+#
+# Au démarrage, le conteneur applique lui-même les migrations puis crée le
+# compte Super Admin. Aucune commande manuelle n'est nécessaire, ce qui
+# permet de déployer sur le plan gratuit (qui n'offre pas d'accès shell).
 # =============================================================
 
 databases:
@@ -57,7 +62,9 @@ services:
         value: '*'
 
       # À renseigner dans le tableau de bord Render (marquées `sync: false`
-      # pour ne pas figurer en clair dans le dépôt).
+      # pour ne jamais figurer en clair dans le dépôt).
+      # Le compte est créé — ou son mot de passe mis à jour — à chaque
+      # démarrage du service.
       - key: SEED_SUPERADMIN_EMAIL
         sync: false
       - key: SEED_SUPERADMIN_PASSWORD

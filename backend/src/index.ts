@@ -3,6 +3,7 @@ import { env } from './config/env';
 import { logger } from './config/logger';
 import { closePool, pool } from './db/pool';
 import { runMigrations } from './db/migrate';
+import { seedSuperAdmin } from './db/seed';
 
 async function main() {
   // Le conteneur applique lui-même les migrations au démarrage : un déploiement
@@ -11,6 +12,16 @@ async function main() {
     await runMigrations();
   } else {
     await pool.query('SELECT 1');
+  }
+
+  // Compte Super Admin créé au démarrage si les variables sont fournies.
+  // L'opération est idempotente, et c'est le seul moyen d'initialiser le
+  // compte sur un hébergement sans accès shell (plan gratuit de Render).
+  if (env.seedSuperAdminEmail && env.seedSuperAdminPassword) {
+    await seedSuperAdmin().catch((error) => {
+      // Un échec du seed ne doit pas empêcher l'API de démarrer.
+      logger.error({ err: error }, 'création du compte Super Admin impossible');
+    });
   }
 
   const app = createApp();

@@ -159,21 +159,33 @@ identiques que l'e-mail existe ou non.
 
 Le dépôt contient un Blueprint prêt à l'emploi.
 
-1. Pousser le dépôt sur GitHub.
-2. Sur Render : **New → Blueprint**, sélectionner le dépôt. `render.yaml` crée
+1. Sur Render : **New → Blueprint**, sélectionner le dépôt. `render.yaml` crée
    la base PostgreSQL et le service API, et génère `JWT_SECRET` automatiquement.
-3. Renseigner `SEED_SUPERADMIN_EMAIL` et `SEED_SUPERADMIN_PASSWORD` dans les
-   variables d'environnement du service.
-4. Après le premier déploiement, créer le compte éditeur depuis le shell Render :
-   `node dist/db/seed.js`.
-5. Une fois l'application mobile publiée, remplacer `CORS_ORIGINS=*` par les
+2. Renseigner `SEED_SUPERADMIN_EMAIL` et `SEED_SUPERADMIN_PASSWORD` dans les
+   variables d'environnement du service, puis **Apply**.
+3. Une fois l'application mobile publiée, remplacer `CORS_ORIGINS=*` par les
    origines réelles.
 
-Les migrations s'appliquent seules à chaque déploiement (`AUTO_MIGRATE=true`) ;
-le conteneur embarque ses propres fichiers SQL.
+Aucune commande manuelle n'est nécessaire. Au démarrage, le conteneur :
 
-> Le plan gratuit de Render met le service en veille après inactivité : la
-> première requête après une pause peut prendre une trentaine de secondes.
+- applique les migrations en attente (`AUTO_MIGRATE=true`) — il embarque ses
+  propres fichiers SQL ;
+- crée le compte Super Admin, ou met à jour son mot de passe si les variables
+  ont changé.
+
+Ce choix est volontaire : le plan gratuit de Render n'offre pas d'accès shell,
+il serait donc impossible d'initialiser le compte autrement.
+
+Vérifier ensuite que le service répond :
+
+```bash
+curl https://<votre-service>.onrender.com/health
+```
+
+> Le plan gratuit met le service en veille après inactivité : la première
+> requête après une pause peut prendre une trentaine de secondes. Vérifiez
+> aussi la durée de validité de la base PostgreSQL gratuite — Render la
+> supprime au bout d'une période limitée.
 
 ---
 
