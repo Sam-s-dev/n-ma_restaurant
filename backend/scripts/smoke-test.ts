@@ -496,6 +496,45 @@ async function main(): Promise<void> {
   const trend = await call('GET', '/api/dashboard/trend?days=7', { token });
   check('courbe sur 7 jours', trend.body?.items?.length === 7, trend.body?.items?.length);
 
+  // Séries des graphiques du tableau de bord (dashboard.charts.ts).
+  const charts = await call('GET', '/api/dashboard/charts?days=14', { token });
+  check('séries des graphiques disponibles', charts.status === 200, charts.body);
+  check('14 jours renvoyés, creux compris', charts.body?.daily?.length === 14, {
+    length: charts.body?.daily?.length,
+  });
+  check('les 24 heures sont présentes', charts.body?.hourly?.length === 24);
+  check('les 7 jours de semaine sont présents', charts.body?.weekday?.length === 7);
+  check(
+    'la période se termine aujourd’hui',
+    charts.body?.range?.to === new Date().toISOString().slice(0, 10),
+    charts.body?.range,
+  );
+
+  const chartsRevenue = (charts.body?.daily ?? []).reduce(
+    (sum: number, point: any) => sum + point.revenue,
+    0,
+  );
+  const paymentTotal = (charts.body?.paymentMix ?? []).reduce(
+    (sum: number, slice: any) => sum + slice.total,
+    0,
+  );
+  check(
+    'recette quotidienne = somme des modes de règlement',
+    Math.round(chartsRevenue * 100) === Math.round(paymentTotal * 100),
+    { chartsRevenue, paymentTotal },
+  );
+  check('recette non nulle sur la période', chartsRevenue > 0, chartsRevenue);
+  check(
+    'les ventes annulées sont exclues',
+    // §14 a annulé une vente de 15 000 : elle ne doit pas peser ici.
+    !(charts.body?.paymentMix ?? []).some((slice: any) => slice.total === 0),
+    charts.body?.paymentMix,
+  );
+  check('palmarès des plats renseigné', (charts.body?.topDishes?.length ?? 0) > 0);
+  check('postes de dépense renseignés', (charts.body?.expensesByCategory?.length ?? 0) > 0);
+  check('alertes de stock renvoyées sous forme de liste', Array.isArray(charts.body?.lowStock));
+  check('débiteurs renvoyés sous forme de liste', Array.isArray(charts.body?.topDebtors));
+
   // ---------------------------------------------------------------------
   section('15 bis. Cloisonnement : tout est rattaché au restaurant (§2.b, §12)');
   // Le second restaurant a été créé au début du test et n'a rien saisi.
@@ -511,6 +550,20 @@ async function main(): Promise<void> {
 
   const otherCash = await call('GET', '/api/cash/balance', { token: otherToken });
   check('caisse du voisin à 0', otherCash.body?.balance === 0, otherCash.body);
+
+  // Les graphiques sont le point le plus exposé à une fuite entre
+  // restaurants : ils agrègent toutes les tables d'un coup.
+  const otherCharts = await call('GET', '/api/dashboard/charts?days=14', { token: otherToken });
+  check(
+    'graphiques du voisin à zéro',
+    (otherCharts.body?.daily ?? []).every((point: any) => point.revenue === 0 && point.expenses === 0),
+    otherCharts.body?.daily,
+  );
+  check(
+    'aucun plat ni dépense chez le voisin',
+    otherCharts.body?.topDishes?.length === 0 && otherCharts.body?.expensesByCategory?.length === 0,
+    { dishes: otherCharts.body?.topDishes, expenses: otherCharts.body?.expensesByCategory },
+  );
 
   const otherCredits = await call('GET', '/api/credits', { token: otherToken });
   check('aucune créance chez le voisin', otherCredits.body?.total === 0, otherCredits.body?.total);

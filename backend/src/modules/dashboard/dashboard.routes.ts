@@ -6,3 +6,4 @@ export const dashboardRouter = Router();
 
 dashboardRouter.get('/summary', asyncHandler(controller.summary));
 dashboardRouter.get('/trend', asyncHandler(controller.trend));
+dashboardRouter.get('/charts', asyncHandler(controller.charts));

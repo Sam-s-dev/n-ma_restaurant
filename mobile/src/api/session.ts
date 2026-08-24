@@ -28,6 +28,23 @@ export async function saveSession(session: LoginResponse): Promise<void> {
   ]);
 }
 
+/**
+ * Enregistre le couple de jetons renouvelé. Le backend fait tourner le
+ * refresh token à chaque usage : sans cette écriture, le jeton conservé
+ * sur l'appareil serait révoqué et la session sauterait au redémarrage.
+ */
+export async function saveTokens(accessToken: string, refreshToken: string): Promise<void> {
+  await AsyncStorage.multiSet([
+    [KEYS.accessToken, accessToken],
+    [KEYS.refreshToken, refreshToken],
+  ]);
+}
+
+/** Met à jour le profil mémorisé (changement de nom, de logo, de devise). */
+export async function saveProfile(profile: Profile): Promise<void> {
+  await AsyncStorage.setItem(KEYS.profile, JSON.stringify(profile));
+}
+
 export async function loadSession(): Promise<StoredSession | null> {
   const entries = await AsyncStorage.multiGet([
     KEYS.accessToken,

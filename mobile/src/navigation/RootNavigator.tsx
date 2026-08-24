@@ -5,10 +5,11 @@ import { LandingScreen } from '../screens/LandingScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { RegisterSuccessScreen } from '../screens/RegisterSuccessScreen';
-import { WorkspacePlaceholderScreen } from '../screens/WorkspacePlaceholderScreen';
+import { WorkspaceScreen } from '../screens/workspace/WorkspaceScreen';
 import { AdminRestaurantsScreen } from '../screens/admin/AdminRestaurantsScreen';
 import type { LoginResponse, Profile } from '../api/auth';
 import type { AdminLoginResponse } from '../api/superadmin';
+import { setAuthTokens, setSessionExpiredHandler } from '../api/authed';
 import { clearSession, loadSession } from '../api/session';
 import { clearAdminSession, loadAdminSession } from '../api/adminSession';
 import type { StoredAdminSession } from '../api/adminSession';
@@ -41,7 +42,12 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
     Promise.all([loadSession(), loadAdminSession()])
       .then(([user, admin]) => {
         if (cancelled) return;
-        if (user) setProfile(user.profile);
+        if (user) {
+          // Les jetons doivent être posés avant le premier rendu de
+          // l'espace : ses écrans lancent leurs requêtes au montage.
+          setAuthTokens({ accessToken: user.accessToken, refreshToken: user.refreshToken });
+          setProfile(user.profile);
+        }
         if (admin) setAdminSession(admin);
       })
       .catch(() => undefined)
@@ -58,9 +64,20 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
   }, [restoring, onReady]);
 
   const handleLogout = useCallback(async () => {
+    setAuthTokens(null);
     await clearSession().catch(() => undefined);
     setProfile(null);
   }, []);
+
+  // Un renouvellement de session impossible (jeton révoqué, compte
+  // désactivé pendant l'utilisation) ramène à la page de connexion plutôt
+  // que de laisser l'espace afficher des erreurs sur chaque écran.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      void handleLogout();
+    });
+    return () => setSessionExpiredHandler(null);
+  }, [handleLogout]);
 
   const handleAdminLogout = useCallback(async () => {
     await clearAdminSession().catch(() => undefined);
@@ -91,7 +108,13 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
           </Stack.Screen>
         ) : profile ? (
           <Stack.Screen name="Workspace">
-            {() => <WorkspacePlaceholderScreen profile={profile} onLogout={handleLogout} />}
+            {() => (
+              <WorkspaceScreen
+                profile={profile}
+                onProfileChange={setProfile}
+                onLogout={handleLogout}
+              />
+            )}
           </Stack.Screen>
         ) : (
           <>
@@ -127,7 +150,13 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
             <Stack.Screen name="Login">
               {({ navigation }) => (
                 <LoginScreen
-                  onSuccess={(session: LoginResponse) => setProfile(session.profile)}
+                  onSuccess={(session: LoginResponse) => {
+                    setAuthTokens({
+                      accessToken: session.accessToken,
+                      refreshToken: session.refreshToken,
+                    });
+                    setProfile(session.profile);
+                  }}
                   onAdminSuccess={(session: AdminLoginResponse) =>
                     setAdminSession({
                       accessToken: session.accessToken,
