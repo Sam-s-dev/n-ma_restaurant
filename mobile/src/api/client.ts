@@ -1,15 +1,20 @@
+/** Backend de production, utilisé si aucune adresse n'est fournie au build. */
+const DEFAULT_API_URL = 'https://n-ma-restaurant.onrender.com';
+
 /**
  * Client HTTP de l'API N'ma Restaurant.
  *
- * L'adresse vient de EXPO_PUBLIC_API_URL (fichier .env à la racine de
- * `mobile/`). Sur un téléphone physique, `localhost` désigne le téléphone
- * lui-même : il faut y mettre l'adresse IP locale de l'ordinateur qui fait
- * tourner le backend, par exemple http://192.168.1.12:4000
+ * L'adresse vient de EXPO_PUBLIC_API_URL, fixée au moment de la compilation
+ * (fichier `mobile/.env` en local, variable d'environnement sur Render).
+ * À défaut, on vise le backend en ligne : c'est le comportement attendu
+ * pour une application distribuée, et cela évite qu'un build oublié pointe
+ * sur `localhost` — introuvable depuis un téléphone.
+ *
+ * Pour développer contre un backend local, mettre dans `mobile/.env`
+ * l'adresse IP du PC (jamais `localhost`) :
+ *   EXPO_PUBLIC_API_URL=http://192.168.1.12:4000
  */
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(
-  /\/+$/,
-  '',
-);
+export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, '');
 
 /** Code d'erreur renvoyé par le backend (voir backend/src/core/errors.ts). */
 export type ApiErrorCode =
