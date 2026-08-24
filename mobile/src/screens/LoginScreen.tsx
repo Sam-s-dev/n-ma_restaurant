@@ -143,9 +143,18 @@ export function LoginScreen({
           await saveAdminSession(adminSession);
           onAdminSuccess(adminSession);
           return;
-        } catch {
-          // Ni gérant ni éditeur : on affiche le message d'origine, qui ne
-          // révèle pas si l'adresse existe.
+        } catch (adminError) {
+          // Si la seconde tentative échoue pour une autre raison que des
+          // identifiants inconnus — limite de tentatives atteinte, serveur
+          // injoignable — c'est cette raison qu'il faut montrer. Afficher
+          // « mot de passe incorrect » enverrait l'éditeur vérifier une
+          // saisie pourtant juste.
+          if (adminError instanceof ApiError && adminError.code !== 'UNAUTHORIZED') {
+            setStatus(statusFromError(adminError));
+            return;
+          }
+          // Ni gérant ni éditeur : on retombe sur le message d'origine, qui
+          // ne révèle pas si l'adresse existe.
         }
       }
 

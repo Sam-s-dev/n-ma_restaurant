@@ -52,3 +52,15 @@ export function rateLimit(options: { windowMs: number; max: number; key?: string
 }
 
 export const authRateLimit = rateLimit({ windowMs: 15 * 60_000, max: 20, key: 'auth' });
+
+/**
+ * Compteur distinct pour l'espace éditeur. L'application n'a qu'une seule
+ * page de connexion : une tentative infructueuse appelle successivement les
+ * deux endpoints. Sans compteurs séparés, chaque essai en consommerait deux
+ * dans le même seau, divisant par deux le nombre d'essais réellement permis.
+ */
+export const superAdminRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 20,
+  key: 'superadmin',
+});

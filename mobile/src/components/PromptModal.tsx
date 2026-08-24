@@ -9,10 +9,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import type { TextStyle } from 'react-native';
 import { Button } from './Button';
 import { colors } from '../theme/colors';
 import { fontFamily, typography } from '../theme/typography';
 import { radius, shadows, spacing } from '../theme/layout';
+
+/** Voir TextField : on retire le halo bleu du navigateur au focus. */
+const noBrowserOutline =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null;
 
 interface PromptModalProps {
   visible: boolean;
@@ -83,7 +88,7 @@ export function PromptModal({
 
           <Text style={styles.label}>{label}</Text>
           <TextInput
-            style={[styles.input, showError && styles.inputError]}
+            style={[styles.input, showError && styles.inputError, noBrowserOutline]}
             value={value}
             onChangeText={setValue}
             placeholder={placeholder}

@@ -1,9 +1,17 @@
 import { forwardRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import type { TextInputProps } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { TextInputProps, TextStyle } from 'react-native';
 import { colors } from '../theme/colors';
 import { fontFamily, typography } from '../theme/typography';
 import { radius, spacing } from '../theme/layout';
+
+/**
+ * Sur le web, React Native Web rend un <input> auquel le navigateur ajoute
+ * son propre halo bleu au focus. On le retire : la bordure rouge du champ
+ * signale déjà le focus, et deux indicateurs superposés font sale.
+ */
+const noBrowserOutline =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null;
 
 interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   label: string;
@@ -36,7 +44,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
       >
         <TextInput
           ref={ref}
-          style={styles.input}
+          style={[styles.input, noBrowserOutline]}
           placeholderTextColor={colors.textTertiary}
           secureTextEntry={isSecure}
           onFocus={(e) => {

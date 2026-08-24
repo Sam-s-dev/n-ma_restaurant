@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../core/asyncHandler';
 import { requireSuperAdmin } from '../../middlewares/auth';
-import { authRateLimit } from '../../middlewares/rateLimit';
+import { superAdminRateLimit } from '../../middlewares/rateLimit';
 import * as controller from './superadmin.controller';
 
 export const superAdminRouter = Router();
 
-superAdminRouter.post('/login', authRateLimit, asyncHandler(controller.login));
+superAdminRouter.post('/login', superAdminRateLimit, asyncHandler(controller.login));
 
 superAdminRouter.use(requireSuperAdmin);
 
