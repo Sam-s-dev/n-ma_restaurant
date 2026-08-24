@@ -6,7 +6,6 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { RegisterSuccessScreen } from '../screens/RegisterSuccessScreen';
 import { WorkspacePlaceholderScreen } from '../screens/WorkspacePlaceholderScreen';
-import { AdminLoginScreen } from '../screens/admin/AdminLoginScreen';
 import { AdminRestaurantsScreen } from '../screens/admin/AdminRestaurantsScreen';
 import type { LoginResponse, Profile } from '../api/auth';
 import type { AdminLoginResponse } from '../api/superadmin';
@@ -20,7 +19,6 @@ export type RootStackParamList = {
   Register: undefined;
   RegisterSuccess: { message: string };
   Login: undefined;
-  AdminLogin: undefined;
   AdminRestaurants: undefined;
   Workspace: undefined;
 };
@@ -102,7 +100,6 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
                 <LandingScreen
                   onRegister={() => navigation.navigate('Register')}
                   onLogin={() => navigation.navigate('Login')}
-                  onAdminAccess={() => navigation.navigate('AdminLogin')}
                 />
               )}
             </Stack.Screen>
@@ -131,16 +128,7 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
               {({ navigation }) => (
                 <LoginScreen
                   onSuccess={(session: LoginResponse) => setProfile(session.profile)}
-                  onBack={() => navigation.goBack()}
-                  onGoToRegister={() => navigation.replace('Register')}
-                />
-              )}
-            </Stack.Screen>
-
-            <Stack.Screen name="AdminLogin">
-              {({ navigation }) => (
-                <AdminLoginScreen
-                  onSuccess={(session: AdminLoginResponse) =>
+                  onAdminSuccess={(session: AdminLoginResponse) =>
                     setAdminSession({
                       accessToken: session.accessToken,
                       refreshToken: session.refreshToken,
@@ -148,6 +136,7 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
                     })
                   }
                   onBack={() => navigation.goBack()}
+                  onGoToRegister={() => navigation.replace('Register')}
                 />
               )}
             </Stack.Screen>

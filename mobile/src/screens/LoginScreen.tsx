@@ -16,13 +16,18 @@ import { TextField } from '../components/TextField';
 import { ApiError } from '../api/client';
 import { login } from '../api/auth';
 import type { LoginResponse } from '../api/auth';
+import { login as adminLogin } from '../api/superadmin';
+import type { AdminLoginResponse } from '../api/superadmin';
 import { saveSession } from '../api/session';
+import { saveAdminSession } from '../api/adminSession';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 import { screenPadding, spacing } from '../theme/layout';
 
 interface LoginScreenProps {
   onSuccess: (session: LoginResponse) => void;
+  /** Le même formulaire ouvre aussi la console de l'éditeur. */
+  onAdminSuccess: (session: AdminLoginResponse) => void;
   onBack: () => void;
   onGoToRegister: () => void;
 }
@@ -85,7 +90,12 @@ function statusFromError(error: ApiError): StatusMessage {
   return { tone: 'danger', title: 'Erreur', message: error.message };
 }
 
-export function LoginScreen({ onSuccess, onBack, onGoToRegister }: LoginScreenProps) {
+export function LoginScreen({
+  onSuccess,
+  onAdminSuccess,
+  onBack,
+  onGoToRegister,
+}: LoginScreenProps) {
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -106,17 +116,40 @@ export function LoginScreen({ onSuccess, onBack, onGoToRegister }: LoginScreenPr
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    const normalizedEmail = email.trim().toLowerCase();
     setSubmitting(true);
     try {
-      const session = await login(email.trim().toLowerCase(), password);
+      // Cas courant : un gérant de restaurant.
+      const session = await login(normalizedEmail, password);
       await saveSession(session);
       onSuccess(session);
     } catch (error) {
-      setStatus(
-        error instanceof ApiError
-          ? statusFromError(error)
-          : { tone: 'danger', title: 'Erreur', message: 'Une erreur inattendue est survenue.' },
-      );
+      if (!(error instanceof ApiError)) {
+        setStatus({
+          tone: 'danger',
+          title: 'Erreur',
+          message: 'Une erreur inattendue est survenue.',
+        });
+        setSubmitting(false);
+        return;
+      }
+
+      // Un 401 signifie « inconnu parmi les gérants » : l'adresse peut être
+      // celle de l'éditeur de la plateforme. Un 403 (compte en attente ou
+      // suspendu) est en revanche un vrai refus, il ne faut pas le masquer.
+      if (error.code === 'UNAUTHORIZED') {
+        try {
+          const adminSession = await adminLogin(normalizedEmail, password);
+          await saveAdminSession(adminSession);
+          onAdminSuccess(adminSession);
+          return;
+        } catch {
+          // Ni gérant ni éditeur : on affiche le message d'origine, qui ne
+          // révèle pas si l'adresse existe.
+        }
+      }
+
+      setStatus(statusFromError(error));
     } finally {
       setSubmitting(false);
     }
@@ -142,7 +175,7 @@ export function LoginScreen({ onSuccess, onBack, onGoToRegister }: LoginScreenPr
         {/* Pas de logo ici : vous l'avez réservé à la page d'accueil. */}
         <Text style={[typography.h1, styles.title]}>Content de vous revoir</Text>
         <Text style={[typography.body, styles.intro]}>
-          Connectez-vous pour retrouver votre caisse, votre stock et votre équipe.
+          Connectez-vous pour retrouver votre espace.
         </Text>
 
         {status && <Banner tone={status.tone} title={status.title} message={status.message} />}

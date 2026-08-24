@@ -1,6 +1,5 @@
 import {
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,11 +37,9 @@ import {
 interface LandingScreenProps {
   onRegister: () => void;
   onLogin: () => void;
-  /** Accès à la console de l'éditeur, volontairement discret (§2.a). */
-  onAdminAccess: () => void;
 }
 
-export function LandingScreen({ onRegister, onLogin, onAdminAccess }: LandingScreenProps) {
+export function LandingScreen({ onRegister, onLogin }: LandingScreenProps) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
@@ -213,9 +210,6 @@ export function LandingScreen({ onRegister, onLogin, onAdminAccess }: LandingScr
         </View>
         <Text style={[typography.small, styles.footerCopyright]}>{footer.copyright}</Text>
 
-        <Pressable onPress={onAdminAccess} hitSlop={10} style={styles.adminLink}>
-          <Text style={styles.adminLinkText}>{footer.adminLabel}</Text>
-        </Pressable>
       </View>
     </ScrollView>
   );
@@ -455,17 +449,5 @@ const styles = StyleSheet.create({
   footerCopyright: {
     color: colors.textTertiary,
     marginTop: spacing.sm,
-  },
-  /* Réservé à l'éditeur : présent mais sans mise en avant. */
-  adminLink: {
-    marginTop: spacing.lg,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
-  adminLinkText: {
-    ...typography.small,
-    fontSize: 12,
-    color: colors.textTertiary,
-    textDecorationLine: 'underline',
   },
 });
