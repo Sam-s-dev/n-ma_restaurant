@@ -1,0 +1,42 @@
+# === Dépendances ===
+node_modules/
+
+# === Sorties de build ===
+dist/
+dist-web/
+build/
+web-build/
+coverage/
+
+# === Secrets et configuration locale ===
+# Le motif sans barre oblique s'applique à tous les dossiers :
+# il couvre .env, backend/.env et mobile/.env.
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+
+# === Expo / React Native ===
+.expo/
+.metro-health-check*
+expo-env.d.ts
+*.tsbuildinfo
+/mobile/ios
+/mobile/android
+
+# === Journaux ===
+*.log
+npm-debug.log*
+yarn-debug.*
+yarn-error.*
+
+# === Système et éditeurs ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

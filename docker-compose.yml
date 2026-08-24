@@ -1,0 +1,63 @@
+# =============================================================
+# Environnement local complet : PostgreSQL + API
+#   docker compose up -d --build
+#   API      → http://localhost:4000
+#   Postgres → localhost:5433 (5432 côté conteneur)
+# =============================================================
+
+name: app-restaurant
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: restaurant_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-restaurant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-restaurant_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-restaurant}
+      # Le tri et les dates sont normalisés pour éviter toute divergence
+      # entre la machine de développement et Render.
+      LANG: C.UTF-8
+      TZ: UTC
+    ports:
+      - '${POSTGRES_PORT:-5436}:5432'
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-restaurant} -d ${POSTGRES_DB:-restaurant}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  api:
+    build:
+      # Contexte à la racine : l'image embarque backend/ ET database/.
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: restaurant_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      DATABASE_URL: postgres://${POSTGRES_USER:-restaurant}:${POSTGRES_PASSWORD:-restaurant_dev_password}@db:5432/${POSTGRES_DB:-restaurant}
+      DATABASE_SSL: disable
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-a-remplacer-absolument-en-production-0123456789}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-2h}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTO_MIGRATE: 'true'
+      SEED_SUPERADMIN_EMAIL: ${SEED_SUPERADMIN_EMAIL:-}
+      SEED_SUPERADMIN_PASSWORD: ${SEED_SUPERADMIN_PASSWORD:-}
+      SEED_SUPERADMIN_NAME: ${SEED_SUPERADMIN_NAME:-Super Admin}
+    ports:
+      - '${API_PORT:-4000}:4000'
+
+volumes:
+  db_data:
