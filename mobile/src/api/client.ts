@@ -16,6 +16,14 @@ const DEFAULT_API_URL = 'https://n-ma-restaurant.onrender.com';
  */
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, '');
 
+/**
+ * Adresse absolue d'une image stockée en base. Les réponses de l'API ne
+ * contiennent qu'un chemin relatif, inutilisable tel quel dans `<Image>`.
+ */
+export function mediaUrl(mediaId: string | null | undefined): string | null {
+  return mediaId ? `${API_URL}/api/media/${mediaId}` : null;
+}
+
 /** Code d'erreur renvoyé par le backend (voir backend/src/core/errors.ts). */
 export type ApiErrorCode =
   | 'BAD_REQUEST'

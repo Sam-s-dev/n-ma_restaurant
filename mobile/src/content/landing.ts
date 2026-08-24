@@ -227,5 +227,6 @@ export const footer = {
   contactLabel: 'Contact',
   contactValue: 'contact@nma-restaurant.com',
   legalLabel: 'Mentions légales',
+  adminLabel: 'Espace administrateur',
   copyright: `© ${new Date().getFullYear()} N’ma Restaurant`,
 } as const;
