@@ -4,6 +4,7 @@ node_modules/
 # === Sorties de build ===
 dist/
 dist-web/
+dist-local/
 build/
 web-build/
 coverage/

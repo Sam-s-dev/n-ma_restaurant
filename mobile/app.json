@@ -27,7 +27,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "N'ma Restaurant",
+      "shortName": "N'ma Restaurant",
+      "lang": "fr",
+      "display": "standalone",
+      "orientation": "portrait",
+      "themeColor": "#E63946",
+      "backgroundColor": "#FAFAFA",
+      "description": "Gérez votre restaurant depuis votre téléphone : ventes, caisse, stock, crédits et personnel."
     },
     "plugins": [
       "expo-font",
@@ -38,7 +46,16 @@
           "imageWidth": 180,
           "backgroundColor": "#FAFAFA"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "N'ma utilise vos photos pour illustrer les plats de votre menu.",
+          "cameraPermission": "N'ma utilise l'appareil photo pour prendre en photo vos plats."
+        }
       ]
-    ]
+    ],
+    "description": "Gérez votre restaurant depuis votre téléphone : ventes, caisse, stock, crédits et personnel.",
+    "primaryColor": "#E63946"
   }
 }

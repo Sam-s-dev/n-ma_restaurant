@@ -15,6 +15,11 @@ export interface DonutSlice {
 
 interface DonutChartProps {
   slices: DonutSlice[];
+  /**
+   * Diamètre. La valeur par défaut est délibérément modeste : sur un écran
+   * de 390 points, un camembert plus large ne laisse pas assez de place à
+   * la légende, et « Achat de stock » s'y retrouve tronqué.
+   */
   size?: number;
   thickness?: number;
   /** Libellé affiché au centre quand aucune part n'est sélectionnée. */
@@ -32,8 +37,8 @@ interface DonutChartProps {
  */
 export function DonutChart({
   slices,
-  size = 148,
-  thickness = 20,
+  size = 132,
+  thickness = 18,
   centerCaption,
   formatValue,
   emptyLabel = 'Rien à afficher pour l’instant.',

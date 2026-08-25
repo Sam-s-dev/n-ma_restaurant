@@ -51,10 +51,11 @@ export interface CreateSalePayload {
   items: Array<{ dishId: string; quantity: number; unitPrice?: number }>;
   paymentMethod: PaymentMethod;
   note?: string;
-  /** Obligatoires pour une vente à crédit (§8). */
+  /**
+   * Obligatoire pour une vente à crédit : la fiche client doit exister
+   * avant la vente, sans quoi la dette n'est rattachable à personne (§8).
+   */
   customerId?: string;
-  customerName?: string;
-  customerPhone?: string;
   dueDate?: string;
 }
 
@@ -92,6 +93,23 @@ export function listSales(
 
 export function getSale(id: string): Promise<Sale> {
   return authed<Sale>(`/api/sales/${id}`);
+}
+
+/** §3, §8 — En-tête du restaurant + lignes de la vente, pour le ticket. */
+export interface Receipt {
+  restaurant: {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    logoUrl: string | null;
+    currencySymbol: string;
+    currencyDecimals: number;
+  };
+  sale: Sale;
+}
+
+export function getReceipt(id: string): Promise<Receipt> {
+  return authed<Receipt>(`/api/sales/${id}/receipt`);
 }
 
 export function cancelSale(id: string, reason: string): Promise<Sale> {

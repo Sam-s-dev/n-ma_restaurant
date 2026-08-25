@@ -95,17 +95,25 @@ export function Sheet({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    justifyContent: 'flex-end',
     backgroundColor: 'rgba(12, 8, 6, 0.5)',
   },
+  /*
+   * `flex: 1` est indispensable : la hauteur maximale de la feuille est
+   * exprimée en pourcentage, et un pourcentage ne se résout que si le
+   * parent a une hauteur réelle. Sans cela la feuille grandissait avec son
+   * contenu, débordait de l'écran, et la liste ne défilait plus — le haut
+   * du panier devenait inatteignable dès qu'on passait en vente à crédit.
+   */
   wrapper: {
+    flex: 1,
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   sheet: {
     width: '100%',
     maxWidth: maxContentWidth,
-    maxHeight: '88%',
+    maxHeight: '92%',
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xxl,
     borderTopRightRadius: radius.xxl,
@@ -147,8 +155,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /* `flexShrink` autorise la zone à se comprimer sous la hauteur maximale
+     de la feuille : c'est ce qui la rend défilante plutôt que débordante. */
   scroll: {
-    flexGrow: 0,
+    flexShrink: 1,
   },
   scrollContent: {
     paddingBottom: spacing.md,

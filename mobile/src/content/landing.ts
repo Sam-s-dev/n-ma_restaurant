@@ -224,8 +224,11 @@ export const finalCta = {
 
 export const footer = {
   tagline: 'Chaque vente comptée. Chaque franc suivi.',
-  contactLabel: 'Contact',
-  contactValue: 'contact@nma-restaurant.com',
+  phoneLabel: 'Téléphone',
+  /** Les deux numéros de l'équipe, appelables d'un toucher. */
+  phones: ['610935524', '627171397'],
+  emailLabel: 'E-mail',
+  email: 'trillionnx@gmail.com',
   legalLabel: 'Mentions légales',
   copyright: `© ${new Date().getFullYear()} N’ma Restaurant`,
 } as const;

@@ -122,7 +122,7 @@ export function CreditsScreen() {
             message="Une vente enregistrée en « Crédit » ouvre automatiquement une créance au nom du client."
           />
         ) : (
-          <Card>
+          <Card reveal={0}>
             {credits.map((credit, index) => {
               const late = credit.dueDate ? daysOverdue(credit.dueDate) > 0 : false;
 

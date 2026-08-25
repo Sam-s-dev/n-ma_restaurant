@@ -19,6 +19,8 @@ export interface Dish {
   price: number;
   isAvailable: boolean;
   isArchived: boolean;
+  /** Portions restantes ; null quand la quantité n'est pas suivie (§5). */
+  availableQuantity: number | null;
 }
 
 export interface DishPayload {
@@ -27,6 +29,8 @@ export interface DishPayload {
   categoryId?: string | null;
   description?: string | null;
   isAvailable?: boolean;
+  photoMediaId?: string | null;
+  availableQuantity?: number | null;
 }
 
 export async function listCategories(): Promise<Category[]> {

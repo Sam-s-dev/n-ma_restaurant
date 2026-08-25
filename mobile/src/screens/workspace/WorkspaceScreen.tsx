@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from '../../components/Icon';
+import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
+import { SceneSwitch } from '../../components/workspace/Motion';
 import { ScreenHeader, WorkspaceHeader } from '../../components/workspace/Headers';
 import { TabBar } from '../../components/workspace/TabBar';
 import type { TabDefinition } from '../../components/workspace/TabBar';
@@ -9,6 +12,7 @@ import type { ToastMessage } from '../../components/workspace/Toast';
 import { fetchSummary } from '../../api/workspace/dashboard';
 import { fetchProfile } from '../../api/workspace/settings';
 import { saveProfile } from '../../api/session';
+import { mediaUrl } from '../../api/client';
 import type { Profile } from '../../api/auth';
 import { formatMoney } from '../../utils/money';
 import type { Currency } from '../../utils/money';
@@ -65,10 +69,16 @@ export function WorkspaceScreen({
   onLogout,
 }: WorkspaceScreenProps) {
   const insets = useSafeAreaInsets();
-  const [route, setRoute] = useState<WorkspaceRoute>('dashboard');
+  /*
+   * Pile de navigation plutôt qu'une simple route courante : le bouton
+   * retour doit ramener là d'où l'on vient, y compris entre deux onglets.
+   * L'accueil est le fond de pile — on ne recule jamais au-delà.
+   */
+  const [history, setHistory] = useState<WorkspaceRoute[]>(['dashboard']);
   const [balance, setBalance] = useState(0);
   const [alerts, setAlerts] = useState({ stock: 0, credits: 0 });
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const toastId = useRef(0);
 
   const currency: Currency = useMemo(
@@ -110,7 +120,23 @@ export function WorkspaceScreen({
       .catch(() => undefined);
   }, [onProfileChange]);
 
-  const navigate = useCallback((next: WorkspaceRoute) => setRoute(next), []);
+  const route = history[history.length - 1] ?? 'dashboard';
+  const canGoBack = history.length > 1;
+
+  const navigate = useCallback((next: WorkspaceRoute) => {
+    setHistory((current) => {
+      if (current[current.length - 1] === next) return current;
+      // Revenir à l'accueil repart de zéro : c'est le point de départ, on
+      // n'y arrive jamais « par-dessus » un autre écran.
+      if (next === 'dashboard') return ['dashboard'];
+      // Vingt entrées suffisent largement et bornent la mémoire.
+      return [...current.slice(-19), next];
+    });
+  }, []);
+
+  const goBack = useCallback(() => {
+    setHistory((current) => (current.length > 1 ? current.slice(0, -1) : current));
+  }, []);
 
   const isTab = TAB_ROUTES.includes(route);
 
@@ -120,19 +146,13 @@ export function WorkspaceScreen({
     if (Platform.OS !== 'android') return undefined;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!isTab) {
-        setRoute('more');
-        return true;
-      }
-      if (route !== 'dashboard') {
-        setRoute('dashboard');
-        return true;
-      }
-      return false;
+      if (!canGoBack) return false;
+      goBack();
+      return true;
     });
 
     return () => subscription.remove();
-  }, [isTab, route]);
+  }, [canGoBack, goBack]);
 
   const tabs: Array<TabDefinition<WorkspaceRoute>> = [
     { key: 'dashboard', label: 'Accueil', icon: 'home' },
@@ -158,33 +178,60 @@ export function WorkspaceScreen({
     <WorkspaceProvider value={contextValue}>
       <View style={styles.screen}>
         <View style={[styles.headerZone, { paddingTop: insets.top + spacing.md }]}>
-          {isTab ? (
+          {route === 'dashboard' ? (
             <WorkspaceHeader
               restaurantName={profile.restaurant.name}
               greeting={`Bonjour ${profile.user.fullName.split(' ')[0] ?? ''}`}
               balance={money(balance)}
-              onPressAccount={() => setRoute('settings')}
+              logoUri={mediaUrl(profile.restaurant.logoMediaId)}
+              onPressAccount={() => navigate('settings')}
+              onLogout={() => setLogoutOpen(true)}
             />
           ) : (
             <ScreenHeader
               title={TITLES[route]}
-              onBack={() => setRoute('more')}
+              onBack={goBack}
               action={
-                <View style={styles.balanceChip}>
-                  <Text style={styles.balanceChipLabel}>Caisse</Text>
-                  <Text style={styles.balanceChipValue} numberOfLines={1}>
-                    {money(balance)}
-                  </Text>
+                <View style={styles.headerActions}>
+                  <View style={styles.balanceChip}>
+                    <Text style={styles.balanceChipLabel}>Caisse</Text>
+                    <Text style={styles.balanceChipValue} numberOfLines={1}>
+                      {money(balance)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => setLogoutOpen(true)}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.logoutSmall, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Se déconnecter"
+                  >
+                    <Icon name="logout" size={16} color={colors.danger} strokeWidth={2.1} />
+                  </Pressable>
                 </View>
               }
             />
           )}
         </View>
 
-        <View style={styles.body}>{renderRoute(route)}</View>
+        <View style={styles.body}>
+          <SceneSwitch sceneKey={route}>{renderRoute(route)}</SceneSwitch>
+        </View>
 
-        <TabBar tabs={tabs} active={isTab ? route : 'more'} onChange={setRoute} />
+        <TabBar tabs={tabs} active={isTab ? route : 'more'} onChange={navigate} />
         <Toast message={toast} onHide={() => setToast(null)} />
+
+        <ConfirmSheet
+          visible={logoutOpen}
+          title="Se déconnecter"
+          message="Vous retournerez à la page de connexion. Toutes vos données restent enregistrées."
+          confirmLabel="Se déconnecter"
+          onCancel={() => setLogoutOpen(false)}
+          onConfirm={() => {
+            setLogoutOpen(false);
+            onLogout();
+          }}
+        />
       </View>
     </WorkspaceProvider>
   );
@@ -230,6 +277,22 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  logoutSmall: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.dangerSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   balanceChip: {
     alignItems: 'flex-end',

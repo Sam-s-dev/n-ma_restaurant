@@ -97,6 +97,8 @@ export async function createSale(
 ): Promise<Sale> {
   return withTransaction(async (tx) => {
     // 1. Chargement des plats — un plat d'un autre restaurant est impossible.
+    //    `FOR UPDATE` sérialise deux ventes simultanées du même plat : sans
+    //    lui, les deux liraient « il reste 1 portion » et la vendraient.
     const dishIds = [...new Set(input.items.map((item) => item.dishId))];
     const dishes = await tx.query<{
       id: string;
@@ -104,19 +106,39 @@ export async function createSale(
       price: number;
       is_available: boolean;
       is_archived: boolean;
+      available_quantity: number | null;
     }>(
-      `SELECT id, name, price, is_available, is_archived
-         FROM dishes WHERE restaurant_id = $1 AND id = ANY($2::uuid[])`,
+      `SELECT id, name, price, is_available, is_archived, available_quantity
+         FROM dishes WHERE restaurant_id = $1 AND id = ANY($2::uuid[])
+         ORDER BY id
+         FOR UPDATE`,
       [restaurantId, dishIds],
     );
 
     const byId = new Map(dishes.map((dish) => [dish.id, dish]));
+    // Quantités cumulées : le même plat peut apparaître sur deux lignes.
+    const requested = new Map<string, number>();
+    for (const item of input.items) {
+      requested.set(item.dishId, (requested.get(item.dishId) ?? 0) + item.quantity);
+    }
+
     for (const id of dishIds) {
       const dish = byId.get(id);
       if (!dish) throw notFound(`Plat ${id}`);
       if (dish.is_archived) throw unprocessable(`Le plat « ${dish.name} » n’est plus au menu.`);
       if (!dish.is_available) {
         throw unprocessable(`Le plat « ${dish.name} » est marqué en rupture.`);
+      }
+
+      // §5 — Portions comptées : on ne vend pas ce qui n'a pas été préparé.
+      const remaining = dish.available_quantity;
+      const wanted = requested.get(id) ?? 0;
+      if (remaining !== null && wanted > remaining) {
+        throw unprocessable(
+          remaining === 0
+            ? `Il ne reste aucune portion de « ${dish.name} ».`
+            : `Il ne reste que ${remaining} portion(s) de « ${dish.name} ».`,
+        );
       }
     }
 
@@ -138,15 +160,9 @@ export async function createSale(
       throw badRequest('Une vente à crédit doit avoir un montant supérieur à zéro.');
     }
 
-    // 3. Client (obligatoire pour une vente à crédit).
+    // 3. Client — une fiche existante, jamais un nom saisi à la volée (§8).
     let customerId: string | null = null;
-    if (input.paymentMethod === 'credit') {
-      customerId = await resolveOrCreateCustomer(tx, restaurantId, {
-        ...(input.customerId ? { customerId: input.customerId } : {}),
-        ...(input.customerName ? { fullName: input.customerName } : {}),
-        phone: input.customerPhone ?? null,
-      });
-    } else if (input.customerId) {
+    if (input.customerId) {
       customerId = await resolveOrCreateCustomer(tx, restaurantId, {
         customerId: input.customerId,
       });
@@ -197,6 +213,20 @@ export async function createSale(
           line.quantity,
           line.lineTotal,
         ],
+      );
+    }
+
+    // 5 bis. Décompte des portions (§5). Le plat qui tombe à zéro sort de la
+    // carte dans la foulée : la caisse le refuserait de toute façon, autant
+    // qu'il disparaisse tout de suite de l'écran de vente.
+    for (const [dishId, quantity] of requested) {
+      if (byId.get(dishId)?.available_quantity === null) continue;
+      await tx.query(
+        `UPDATE dishes
+            SET available_quantity = available_quantity - $1,
+                is_available       = (available_quantity - $1) > 0
+          WHERE id = $2 AND restaurant_id = $3`,
+        [quantity, dishId, restaurantId],
       );
     }
 
@@ -405,6 +435,23 @@ export async function cancelSale(
         createdBy: userId,
       });
     }
+
+    // Les portions retournent au plat : la commande annulée n'a pas été
+    // servie. Un plat qui repasse au-dessus de zéro revient à la carte.
+    await tx.query(
+      `UPDATE dishes d
+          SET available_quantity = d.available_quantity + line.quantity,
+              is_available       = true
+         FROM (SELECT dish_id, sum(quantity)::int AS quantity
+                 FROM sale_items
+                WHERE sale_id = $1 AND dish_id IS NOT NULL
+                GROUP BY dish_id) AS line
+        WHERE d.id = line.dish_id
+          AND d.restaurant_id = $2
+          AND d.available_quantity IS NOT NULL
+          AND NOT d.is_archived`,
+      [saleId, restaurantId],
+    );
 
     await tx.query(
       `UPDATE sales SET status = 'cancelled', cancelled_at = now(), cancel_reason = $1

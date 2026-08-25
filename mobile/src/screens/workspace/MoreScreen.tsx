@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '../../components/Icon';
+import { DepthPressable, Reveal } from '../../components/workspace/Motion';
 import type { IconName } from '../../components/Icon';
 import { fetchSummary } from '../../api/workspace/dashboard';
 import type { DashboardSummary } from '../../api/workspace/dashboard';
@@ -119,22 +120,22 @@ export function MoreScreen() {
       </Text>
 
       <View style={styles.grid}>
-        {MODULES.map((module) => (
-          <Pressable
-            key={module.route}
-            onPress={() => navigate(module.route)}
-            accessibilityRole="button"
-            accessibilityLabel={module.label}
-            style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
-          >
-            <View style={[styles.tileIcon, { backgroundColor: module.background }]}>
-              <Icon name={module.icon} size={20} color={module.color} />
-            </View>
-            <Text style={styles.tileLabel}>{module.label}</Text>
-            <Text style={styles.tileCaption} numberOfLines={2}>
-              {module.caption(summary, money)}
-            </Text>
-          </Pressable>
+        {MODULES.map((module, index) => (
+          <Reveal key={module.route} index={index} style={styles.tileSlot}>
+            <DepthPressable
+              onPress={() => navigate(module.route)}
+              accessibilityLabel={module.label}
+              style={styles.tile}
+            >
+              <View style={[styles.tileIcon, { backgroundColor: module.background }]}>
+                <Icon name={module.icon} size={20} color={module.color} />
+              </View>
+              <Text style={styles.tileLabel}>{module.label}</Text>
+              <Text style={styles.tileCaption} numberOfLines={2}>
+                {module.caption(summary, money)}
+              </Text>
+            </DepthPressable>
+          </Reveal>
         ))}
       </View>
     </ScrollView>
@@ -161,20 +162,19 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.md,
   },
-  tile: {
+  tileSlot: {
     flexGrow: 1,
     flexBasis: '46%',
     minWidth: 150,
     maxWidth: 240,
+  },
+  tile: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     padding: spacing.lg,
     ...shadows.soft,
-  },
-  tilePressed: {
-    opacity: 0.75,
   },
   tileIcon: {
     width: 40,

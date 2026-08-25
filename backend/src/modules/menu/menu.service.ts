@@ -101,6 +101,8 @@ export interface Dish {
   price: number;
   isAvailable: boolean;
   isArchived: boolean;
+  /** Portions restantes ; null quand la quantité n'est pas suivie (§5). */
+  availableQuantity: number | null;
 }
 
 interface DishRow {
@@ -113,6 +115,7 @@ interface DishRow {
   price: number;
   is_available: boolean;
   is_archived: boolean;
+  available_quantity: number | null;
 }
 
 const toDish = (row: DishRow): Dish => ({
@@ -126,11 +129,13 @@ const toDish = (row: DishRow): Dish => ({
   price: row.price,
   isAvailable: row.is_available,
   isArchived: row.is_archived,
+  availableQuantity: row.available_quantity,
 });
 
 const DISH_SELECT = `
   SELECT d.id, d.name, d.description, d.category_id, c.name AS category_name,
-         d.photo_media_id, d.price, d.is_available, d.is_archived
+         d.photo_media_id, d.price, d.is_available, d.is_archived,
+         d.available_quantity
     FROM dishes d
     LEFT JOIN menu_categories c ON c.id = d.category_id`;
 
@@ -183,8 +188,9 @@ export async function createDish(restaurantId: string, input: CreateDishInput): 
 
   const row = await queryOne<{ id: string }>(
     `INSERT INTO dishes
-       (restaurant_id, name, description, category_id, photo_media_id, price, is_available)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (restaurant_id, name, description, category_id, photo_media_id, price,
+        is_available, available_quantity)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
       restaurantId,
@@ -193,7 +199,10 @@ export async function createDish(restaurantId: string, input: CreateDishInput): 
       input.categoryId ?? null,
       input.photoMediaId ?? null,
       round2(input.price),
-      input.isAvailable,
+      // Un plat créé avec zéro portion naît en rupture : le proposer à la
+      // vente pour le refuser aussitôt n'aurait aucun sens.
+      input.availableQuantity === 0 ? false : input.isAvailable,
+      input.availableQuantity ?? null,
     ],
   );
   if (!row) throw new Error('Création du plat impossible.');
@@ -208,6 +217,19 @@ export async function updateDish(
   await assertMediaBelongs(restaurantId, input.photoMediaId);
 
   const payload = { ...input, ...(input.price !== undefined ? { price: round2(input.price) } : {}) };
+
+  /*
+   * §5 — Remettre des portions, c'est remettre le plat à la carte.
+   *
+   * C'est le geste attendu du gérant : il revient sur la fiche, saisit le
+   * nombre préparé, et le plat redevient vendable. Lui demander en plus de
+   * basculer « disponible » serait un piège — il croirait avoir réapprovisionné
+   * alors que le plat resterait refusé à la caisse.
+   */
+  if (payload.availableQuantity !== undefined && payload.isAvailable === undefined) {
+    payload.isAvailable = payload.availableQuantity === null || payload.availableQuantity > 0;
+  }
+
   const { setClause, values, nextIndex } = buildUpdate(payload, {
     name: 'name',
     description: 'description',
@@ -215,6 +237,7 @@ export async function updateDish(
     photoMediaId: 'photo_media_id',
     price: 'price',
     isAvailable: 'is_available',
+    availableQuantity: 'available_quantity',
   });
 
   const row = await queryOne<{ id: string }>(
@@ -236,6 +259,22 @@ export async function setAvailability(
   id: string,
   isAvailable: boolean,
 ): Promise<Dish> {
+  // Remettre à la carte un plat dont il ne reste zéro portion produirait un
+  // plat « disponible » que la caisse refuserait : on l'empêche ici, avec
+  // le geste à faire à la place.
+  if (isAvailable) {
+    const current = await queryOne<{ available_quantity: number | null }>(
+      'SELECT available_quantity FROM dishes WHERE id = $1 AND restaurant_id = $2',
+      [id, restaurantId],
+    );
+    if (!current) throw notFound('Plat');
+    if (current.available_quantity === 0) {
+      throw conflict(
+        'Il ne reste aucune portion de ce plat. Saisissez la quantité préparée pour le remettre à la carte.',
+      );
+    }
+  }
+
   const row = await queryOne<{ id: string }>(
     `UPDATE dishes SET is_available = $1
       WHERE id = $2 AND restaurant_id = $3 AND NOT is_archived

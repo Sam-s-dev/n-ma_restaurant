@@ -118,7 +118,7 @@ export function StockScreen() {
           />
         }
       >
-        <Card style={styles.summary}>
+        <Card reveal={0} style={styles.summary}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Valeur du stock</Text>
@@ -193,7 +193,7 @@ export function StockScreen() {
             }
           />
         ) : (
-          <Card>
+          <Card reveal={1}>
             {items.map((item, index) => (
               <View key={item.id}>
                 {index > 0 && <RowDivider />}

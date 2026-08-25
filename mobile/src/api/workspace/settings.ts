@@ -45,6 +45,8 @@ export function updateSettings(payload: {
   name?: string;
   address?: string | null;
   phone?: string | null;
+  /** Repris en tête des tickets de vente (§3). */
+  logoMediaId?: string | null;
   currencyCode?: string;
   currencySymbol?: string;
   currencyDecimals?: number;

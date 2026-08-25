@@ -1,11 +1,4 @@
-import {
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
@@ -14,7 +7,7 @@ import { FaqItem } from '../components/FaqItem';
 import { LottieIcon } from '../components/LottieIcon';
 import { ServiceFlow } from '../components/ServiceFlow';
 import { colors } from '../theme/colors';
-import { typography } from '../theme/typography';
+import { fontFamily, typography } from '../theme/typography';
 import { maxContentWidth, radius, screenPadding, shadows, spacing } from '../theme/layout';
 import {
   audiences,
@@ -202,12 +195,38 @@ export function LandingScreen({ onRegister, onLogin }: LandingScreenProps) {
       {/* ------------------------------ Footer ---------------------------- */}
       <View style={styles.footer}>
         <Text style={[typography.bodyStrong, styles.footerTagline]}>{footer.tagline}</Text>
-        <View style={styles.footerLinks}>
-          <Text style={typography.small}>
-            {footer.contactLabel} · {footer.contactValue}
-          </Text>
-          <Text style={typography.small}>{footer.legalLabel}</Text>
+
+        {/* Numéros et adresse cliquables : sur téléphone, le toucher ouvre
+            directement l'appel ou le courrier. */}
+        <View style={styles.footerContact}>
+          <Text style={[typography.small, styles.footerLabel]}>{footer.phoneLabel}</Text>
+          <View style={styles.footerPhones}>
+            {footer.phones.map((phone, index) => (
+              <Text
+                key={phone}
+                style={[typography.small, styles.footerLink]}
+                onPress={() => Linking.openURL(`tel:${phone}`)}
+                accessibilityRole="link"
+              >
+                {phone}
+                {index < footer.phones.length - 1 ? '  ·' : ''}
+              </Text>
+            ))}
+          </View>
         </View>
+
+        <View style={styles.footerContact}>
+          <Text style={[typography.small, styles.footerLabel]}>{footer.emailLabel}</Text>
+          <Text
+            style={[typography.small, styles.footerLink]}
+            onPress={() => Linking.openURL(`mailto:${footer.email}`)}
+            accessibilityRole="link"
+          >
+            {footer.email}
+          </Text>
+        </View>
+
+        <Text style={[typography.small, styles.footerLegal]}>{footer.legalLabel}</Text>
         <Text style={[typography.small, styles.footerCopyright]}>{footer.copyright}</Text>
 
       </View>
@@ -441,6 +460,28 @@ const styles = StyleSheet.create({
   },
   footerTagline: {
     textAlign: 'center',
+  },
+  footerContact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  footerLabel: {
+    color: colors.textTertiary,
+  },
+  footerPhones: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  footerLink: {
+    color: colors.primary,
+    fontFamily: fontFamily.semiBold,
+  },
+  footerLegal: {
+    marginTop: spacing.md,
+    color: colors.textTertiary,
   },
   footerLinks: {
     alignItems: 'center',

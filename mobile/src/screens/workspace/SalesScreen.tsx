@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
@@ -8,9 +8,13 @@ import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
 import { Field } from '../../components/workspace/Field';
 import { EmptyState, ListRow, RowDivider } from '../../components/workspace/ListRow';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
+import { Receipt, shareReceipt } from '../../components/workspace/Receipt';
+import { Reveal } from '../../components/workspace/Motion';
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
-import { ApiError } from '../../api/client';
+import { ApiError, mediaUrl } from '../../api/client';
+import { createCustomer, listCustomers } from '../../api/workspace/customers';
+import type { Customer } from '../../api/workspace/customers';
 import { listCategories, listDishes } from '../../api/workspace/menu';
 import type { Category, Dish } from '../../api/workspace/menu';
 import {
@@ -18,10 +22,18 @@ import {
   STATUS_LABELS,
   cancelSale,
   createSale,
+  getReceipt,
   getSale,
   listSales,
 } from '../../api/workspace/sales';
-import type { PaymentMethod, Sale, SaleStatus, SalesPage } from '../../api/workspace/sales';
+import type {
+  PaymentMethod,
+  Receipt as ReceiptData,
+  Sale,
+  SaleStatus,
+  SalesPage,
+} from '../../api/workspace/sales';
+import { SearchField } from '../../components/workspace/SearchField';
 import { formatDateTime, formatRelativeDay, todayISO } from '../../utils/date';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
@@ -177,12 +189,12 @@ function NewSale() {
         </View>
 
         <View style={styles.dishGrid}>
-          {visibleDishes.map((dish) => {
+          {visibleDishes.map((dish, position) => {
             const inCart = cart.find((line) => line.dish.id === dish.id)?.quantity ?? 0;
 
             return (
+              <Reveal key={dish.id} index={position} style={styles.dishSlot}>
               <Pressable
-                key={dish.id}
                 onPress={() => dish.isAvailable && addToCart(dish)}
                 disabled={!dish.isAvailable}
                 accessibilityRole="button"
@@ -193,6 +205,18 @@ function NewSale() {
                   pressed && dish.isAvailable && styles.dishCardPressed,
                 ]}
               >
+                {dish.photoMediaId ? (
+                  <Image
+                    source={{ uri: mediaUrl(dish.photoMediaId) as string }}
+                    style={styles.dishImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.dishImage, styles.dishImagePlaceholder]}>
+                    <Icon name="menu-book" size={20} color={colors.textTertiary} strokeWidth={1.7} />
+                  </View>
+                )}
+
                 {inCart > 0 && (
                   <View style={styles.dishCount}>
                     <Text style={styles.dishCountText}>{inCart}</Text>
@@ -209,8 +233,17 @@ function NewSale() {
                   {money(dish.price)}
                 </Text>
 
-                {!dish.isAvailable && <Text style={styles.dishOff}>En rupture</Text>}
+                {!dish.isAvailable ? (
+                  <Text style={styles.dishOff}>En rupture</Text>
+                ) : dish.availableQuantity !== null ? (
+                  <Text
+                    style={[styles.dishStock, dish.availableQuantity <= 3 && styles.dishStockLow]}
+                  >
+                    {dish.availableQuantity} portion(s)
+                  </Text>
+                ) : null}
               </Pressable>
+              </Reveal>
             );
           })}
         </View>
@@ -255,7 +288,7 @@ function NewSale() {
         }}
       />
 
-      <ReceiptSheet sale={receipt} money={money} onClose={() => setReceipt(null)} />
+      <ReceiptSheet sale={receipt} onClose={() => setReceipt(null)} />
     </View>
   );
 }
@@ -282,30 +315,30 @@ function CheckoutSheet({
   onDone,
 }: CheckoutSheetProps) {
   const [payment, setPayment] = useState<PaymentMethod>('cash');
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [dueDate, setDueDate] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | undefined>();
+  const [customerError, setCustomerError] = useState<string | undefined>();
 
   useEffect(() => {
     if (visible) {
       setError(null);
-      setNameError(undefined);
+      setCustomerError(undefined);
     }
   }, [visible]);
 
   const isCredit = payment === 'credit';
 
   async function submit() {
-    // §8 — sans client identifié, impossible de savoir qui doit l'argent.
-    if (isCredit && customerName.trim().length < 2) {
-      setNameError('Indiquez le nom du client.');
+    // §8 — La dette doit pointer sur une fiche client existante, sinon
+    // personne ne saura à qui la réclamer le jour du remboursement.
+    if (isCredit && !customer) {
+      setCustomerError('Choisissez le client, ou enregistrez-le d’abord.');
       return;
     }
-    setNameError(undefined);
+    setCustomerError(undefined);
     setError(null);
     setSaving(true);
 
@@ -314,13 +347,11 @@ function CheckoutSheet({
         items: cart.map((line) => ({ dishId: line.dish.id, quantity: line.quantity })),
         paymentMethod: payment,
         ...(note.trim() ? { note: note.trim() } : {}),
-        ...(isCredit ? { customerName: customerName.trim() } : {}),
-        ...(isCredit && customerPhone.trim() ? { customerPhone: customerPhone.trim() } : {}),
+        ...(customer ? { customerId: customer.id } : {}),
         ...(isCredit && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? { dueDate } : {}),
       });
 
-      setCustomerName('');
-      setCustomerPhone('');
+      setCustomer(null);
       setDueDate('');
       setNote('');
       setPayment('cash');
@@ -398,24 +429,16 @@ function CheckoutSheet({
           <Text style={styles.creditNote}>
             La vente ne rentrera pas en caisse : une créance sera ouverte au nom du client.
           </Text>
-          <Field
-            label="Nom du client"
-            value={customerName}
-            onChangeText={(value) => {
-              setCustomerName(value);
-              if (nameError) setNameError(undefined);
+
+          <CustomerPicker
+            selected={customer}
+            onSelect={(next) => {
+              setCustomer(next);
+              setCustomerError(undefined);
             }}
-            placeholder="Mariama Diallo"
-            error={nameError}
+            error={customerError}
           />
-          <Field
-            label="Téléphone (facultatif)"
-            value={customerPhone}
-            onChangeText={setCustomerPhone}
-            placeholder="620 00 00 00"
-            keyboardType="phone-pad"
-            hint="Un client déjà connu par son numéro sera réutilisé."
-          />
+
           <Field
             label="Échéance (facultatif)"
             value={dueDate}
@@ -438,50 +461,279 @@ function CheckoutSheet({
   );
 }
 
+interface CustomerPickerProps {
+  selected: Customer | null;
+  onSelect: (customer: Customer | null) => void;
+  error?: string | undefined;
+}
+
+/**
+ * Choix du client d'une vente à crédit.
+ *
+ * Seules les fiches déjà enregistrées sont proposées : un nom tapé
+ * librement créait un client par vente — « Mariama », « mariama »,
+ * « Mariama D. » finissaient en trois dettes distinctes, et plus personne
+ * ne savait qui devait quoi le jour du remboursement.
+ *
+ * Un client inconnu peut être enregistré sans quitter la vente : la fiche
+ * est réellement créée, on la retrouvera dans Clients et dans Créances.
+ */
+function CustomerPicker({ selected, onSelect, error }: CustomerPickerProps) {
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await listCustomers();
+      setCustomers(result.items);
+    } catch {
+      // La création reste possible même si la liste n'a pas pu être lue.
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const matches = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const list = term
+      ? customers.filter(
+          (item) =>
+            item.fullName.toLowerCase().includes(term) || (item.phone ?? '').includes(term),
+        )
+      : customers;
+    return list.slice(0, 8);
+  }, [customers, search]);
+
+  async function create() {
+    if (newName.trim().length < 2) {
+      setFormError('Indiquez le nom du client.');
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      const created = await createCustomer({
+        fullName: newName.trim(),
+        phone: newPhone.trim() === '' ? null : newPhone.trim(),
+      });
+      setCustomers((current) => [created, ...current]);
+      onSelect(created);
+      setCreating(false);
+      setNewName('');
+      setNewPhone('');
+    } catch (cause) {
+      setFormError(cause instanceof ApiError ? cause.message : 'Création impossible.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (selected) {
+    return (
+      <View style={styles.pickerWrapper}>
+        <Text style={styles.blockLabel}>Client</Text>
+        <View style={styles.selectedCustomer}>
+          <View style={styles.selectedAvatar}>
+            <Text style={styles.selectedInitials}>{initialsOf(selected.fullName)}</Text>
+          </View>
+          <View style={styles.selectedTexts}>
+            <Text style={styles.selectedName} numberOfLines={1}>
+              {selected.fullName}
+            </Text>
+            <Text style={styles.selectedMeta} numberOfLines={1}>
+              {selected.phone ?? 'Sans téléphone'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => onSelect(null)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Changer de client"
+          >
+            <Icon name="close" size={16} color={colors.textTertiary} strokeWidth={2.2} />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (creating) {
+    return (
+      <View style={styles.pickerWrapper}>
+        <Text style={styles.blockLabel}>Enregistrer le client</Text>
+        <Field
+          label="Nom complet"
+          value={newName}
+          onChangeText={setNewName}
+          placeholder="Mariama Diallo"
+          autoFocus
+          error={formError ?? undefined}
+        />
+        <Field
+          label="Téléphone (facultatif)"
+          value={newPhone}
+          onChangeText={setNewPhone}
+          placeholder="620 00 00 00"
+          keyboardType="phone-pad"
+        />
+        <View style={styles.pickerActions}>
+          <Pressable
+            onPress={() => void create()}
+            disabled={saving}
+            style={styles.pickerPrimary}
+            accessibilityRole="button"
+          >
+            <Text style={styles.pickerPrimaryText}>
+              {saving ? 'Enregistrement…' : 'Enregistrer et choisir'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setCreating(false)} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.pickerCancel}>Revenir à la liste</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.pickerWrapper}>
+      <Text style={styles.blockLabel}>Client</Text>
+
+      <SearchField value={search} onChangeText={setSearch} placeholder="Nom ou téléphone…" />
+
+      {Boolean(error) && <Text style={styles.pickerError}>{error}</Text>}
+
+      <View style={styles.pickerList}>
+        {loading ? (
+          <Text style={styles.pickerEmpty}>Chargement des clients…</Text>
+        ) : matches.length === 0 ? (
+          <Text style={styles.pickerEmpty}>
+            {customers.length === 0
+              ? 'Aucun client enregistré pour l’instant.'
+              : 'Aucun client ne correspond à cette recherche.'}
+          </Text>
+        ) : (
+          matches.map((item, index) => (
+            <Pressable
+              key={item.id}
+              onPress={() => onSelect(item)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.pickerRow, pressed && styles.pickerRowPressed]}
+            >
+              {index > 0 && <View style={styles.pickerRowLine} />}
+              <View style={styles.pickerAvatar}>
+                <Text style={styles.pickerInitials}>{initialsOf(item.fullName)}</Text>
+              </View>
+              <View style={styles.selectedTexts}>
+                <Text style={styles.selectedName} numberOfLines={1}>
+                  {item.fullName}
+                </Text>
+                <Text style={styles.selectedMeta} numberOfLines={1}>
+                  {item.phone ?? 'Sans téléphone'}
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={15} color={colors.textTertiary} strokeWidth={2.3} />
+            </Pressable>
+          ))
+        )}
+      </View>
+
+      <Pressable
+        onPress={() => {
+          setFormError(null);
+          setNewName(search.trim());
+          setCreating(true);
+        }}
+        style={styles.pickerAdd}
+        accessibilityRole="button"
+      >
+        <Icon name="plus" size={15} color={colors.primary} strokeWidth={2.4} />
+        <Text style={styles.pickerAddText}>Enregistrer un nouveau client</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
 interface ReceiptSheetProps {
   sale: Sale | null;
-  money: (value: number) => string;
   onClose: () => void;
 }
 
-/** Ticket affiché juste après la vente : le gérant peut le relire au client. */
-function ReceiptSheet({ sale, money, onClose }: ReceiptSheetProps) {
+/**
+ * Ticket affiché juste après la vente, aux couleurs du restaurant.
+ *
+ * Il est rechargé depuis `/sales/:id/receipt` plutôt que reconstruit à
+ * partir de la réponse de création : c'est le serveur qui détient l'en-tête
+ * du restaurant (nom, logo, adresse), et le ticket doit refléter les
+ * paramètres du moment.
+ */
+function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
+  const [data, setData] = useState<ReceiptData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sale) {
+      setData(null);
+      return;
+    }
+    setError(null);
+    getReceipt(sale.id)
+      .then(setData)
+      .catch((cause) =>
+        setError(cause instanceof ApiError ? cause.message : 'Ticket indisponible.'),
+      );
+  }, [sale]);
+
   return (
     <Sheet
       visible={Boolean(sale)}
       title="Vente enregistrée"
       subtitle={sale ? `Ticket ${sale.reference}` : undefined}
+      error={error}
       onClose={onClose}
-      actions={<Button label="Nouvelle vente" onPress={onClose} />}
-    >
-      {sale && (
+      actions={
         <>
-          <View style={styles.receiptBanner}>
-            <View style={styles.receiptIcon}>
-              <Icon name="check" size={20} color={colors.textOnPrimary} strokeWidth={2.8} />
-            </View>
-            <Text style={styles.receiptTotal}>{money(sale.totalAmount)}</Text>
-            <Text style={styles.receiptMethod}>
-              {PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod}
-              {sale.customerName ? ` · ${sale.customerName}` : ''}
-            </Text>
-          </View>
-
-          {(sale.items ?? []).map((item) => (
-            <View key={item.id} style={styles.receiptLine}>
-              <Text style={styles.receiptLineName} numberOfLines={1}>
-                {item.quantity} × {item.dishName}
-              </Text>
-              <Text style={styles.receiptLineValue}>{money(item.lineTotal)}</Text>
-            </View>
-          ))}
-
-          {sale.credit && (
-            <Text style={styles.receiptCredit}>
-              Créance ouverte : {money(sale.credit.amountLeft)} à recouvrer.
-            </Text>
+          {data && (
+            <Button
+              label="Envoyer le ticket au client"
+              onPress={() => void shareReceipt(data)}
+              variant="secondary"
+            />
           )}
+          <Button label="Nouvelle vente" onPress={onClose} />
         </>
+      }
+    >
+      <View style={styles.successBadge}>
+        <View style={styles.successIcon}>
+          <Icon name="check" size={18} color={colors.textOnPrimary} strokeWidth={2.8} />
+        </View>
+        <Text style={styles.successText}>Encaissement enregistré</Text>
+      </View>
+
+      {data ? (
+        <Receipt data={data} />
+      ) : (
+        <Text style={styles.receiptLoading}>Préparation du ticket…</Text>
       )}
     </Sheet>
   );
@@ -575,7 +827,7 @@ function SalesHistory() {
         </View>
 
         {page && (
-          <Card style={styles.totalsCard}>
+          <Card reveal={0} style={styles.totalsCard}>
             <View style={styles.totalsRow}>
               <Totals label="Chiffre d’affaires" value={money(page.totals.amount)} />
               <View style={styles.totalsSeparator} />
@@ -593,7 +845,7 @@ function SalesHistory() {
             message="Les ventes enregistrées apparaîtront ici, du plus récent au plus ancien."
           />
         ) : (
-          <Card>
+          <Card reveal={1}>
             {sales.map((sale, index) => (
               <View key={sale.id}>
                 {index > 0 && <RowDivider />}
@@ -747,11 +999,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.md,
   },
-  dishCard: {
+  dishSlot: {
     flexGrow: 1,
     flexBasis: '46%',
     minWidth: 150,
     maxWidth: 220,
+  },
+  dishCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
@@ -765,6 +1019,27 @@ const styles = StyleSheet.create({
   dishCardPressed: {
     transform: [{ scale: 0.975 }],
     borderColor: colors.primary,
+  },
+  dishImage: {
+    width: '100%',
+    height: 84,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundAlt,
+    marginBottom: spacing.md,
+  },
+  dishImagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dishStock: {
+    fontFamily: fontFamily.medium,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
+  dishStockLow: {
+    color: colors.warning,
   },
   dishCount: {
     position: 'absolute',
@@ -952,6 +1227,139 @@ const styles = StyleSheet.create({
   creditBlock: {
     marginBottom: spacing.sm,
   },
+  pickerWrapper: {
+    marginBottom: spacing.lg,
+  },
+  pickerList: {
+    marginTop: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  pickerRowPressed: {
+    backgroundColor: colors.backgroundAlt,
+  },
+  pickerRowLine: {
+    position: 'absolute',
+    top: 0,
+    left: spacing.md,
+    right: spacing.md,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+  },
+  pickerAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    backgroundColor: colors.pastelPink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerInitials: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.iconPink,
+  },
+  pickerEmpty: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textTertiary,
+    padding: spacing.lg,
+    textAlign: 'center',
+  },
+  pickerError: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.danger,
+    marginTop: 6,
+  },
+  pickerAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
+  pickerAddText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.primary,
+  },
+  pickerActions: {
+    gap: spacing.md,
+    alignItems: 'center',
+  },
+  pickerPrimary: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+  },
+  pickerPrimaryText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textOnPrimary,
+  },
+  pickerCancel: {
+    fontFamily: fontFamily.medium,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+  },
+  selectedCustomer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  selectedAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedInitials: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.primary,
+  },
+  selectedTexts: {
+    flex: 1,
+  },
+  selectedName: {
+    ...typography.bodyStrong,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  selectedMeta: {
+    fontFamily: fontFamily.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+  },
   creditNote: {
     ...typography.small,
     fontSize: 12,
@@ -966,6 +1374,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textTertiary,
     textAlign: 'center',
+  },
+  successBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.successSoft,
+    marginBottom: spacing.lg,
+  },
+  successIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successText: {
+    ...typography.bodyStrong,
+    fontSize: 13,
+    color: colors.success,
+  },
+  receiptLoading: {
+    ...typography.small,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    paddingVertical: spacing.xxl,
   },
   receiptBanner: {
     alignItems: 'center',

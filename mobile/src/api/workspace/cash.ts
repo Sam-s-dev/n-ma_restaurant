@@ -2,7 +2,13 @@ import { authed, queryString } from '../authed';
 
 /** §7 — Caisse : solde et grand livre des mouvements. */
 export type CashDirection = 'in' | 'out';
-export type CashCategory = 'sale' | 'credit_payment' | 'expense' | 'salary' | 'adjustment';
+export type CashCategory =
+  | 'sale'
+  | 'credit_payment'
+  | 'expense'
+  | 'salary'
+  | 'adjustment'
+  | 'capital';
 
 export interface CashBalance {
   balance: number;
@@ -38,7 +44,8 @@ export const CATEGORY_LABELS: Record<CashCategory, string> = {
   credit_payment: 'Remboursement',
   expense: 'Dépense',
   salary: 'Salaire',
-  adjustment: 'Ajustement',
+  adjustment: 'Correction',
+  capital: 'Apport',
 };
 
 export function fetchBalance(): Promise<CashBalance> {
@@ -59,8 +66,8 @@ export function listMovements(
 }
 
 /**
- * Correction manuelle du solde : fonds de caisse initial, erreur de saisie.
- * Le grand livre n'est jamais modifié, une écriture est ajoutée.
+ * Correction d'une erreur de saisie. Le grand livre n'est jamais modifié :
+ * une écriture inverse est ajoutée.
  */
 export function adjustCash(payload: {
   direction: CashDirection;
@@ -68,4 +75,18 @@ export function adjustCash(payload: {
   label: string;
 }): Promise<CashBalance> {
   return authed<CashBalance>('/api/cash/adjustments', { method: 'POST', body: payload });
+}
+
+/**
+ * §7 — Apport (ou retrait) du gérant : l'argent qu'il met de sa poche dans
+ * la caisse pour démarrer la journée ou couvrir un achat. Classé à part des
+ * ventes et des remboursements, qui viennent eux des clients.
+ */
+export function contributeCash(payload: {
+  direction: CashDirection;
+  amount: number;
+  label?: string;
+  paymentMethod?: string;
+}): Promise<CashBalance> {
+  return authed<CashBalance>('/api/cash/contributions', { method: 'POST', body: payload });
 }

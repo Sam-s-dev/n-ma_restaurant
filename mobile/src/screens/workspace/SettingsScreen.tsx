@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
 import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
 import { Field } from '../../components/workspace/Field';
 import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
+import { PhotoField } from '../../components/workspace/PhotoField';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { Sheet } from '../../components/workspace/Sheet';
-import { ApiError } from '../../api/client';
+import { ApiError, mediaUrl } from '../../api/client';
 import {
   changePassword,
   fetchSettings,
@@ -110,7 +111,7 @@ export function SettingsScreen() {
         }
       >
         {/* --- Identité du restaurant ---------------------------------- */}
-        <Card style={styles.card}>
+        <Card reveal={0} style={styles.card}>
           <SectionHeader
             title="Le restaurant"
             caption="Ces informations figurent sur vos tickets"
@@ -126,6 +127,31 @@ export function SettingsScreen() {
             }
           />
 
+          <View style={styles.identity}>
+            {settings?.logoMediaId ? (
+              <Image
+                source={{ uri: mediaUrl(settings.logoMediaId) as string }}
+                style={styles.logo}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[styles.logo, styles.logoFallback]}>
+                <Text style={styles.logoInitials}>{initialsOf(settings?.name ?? '')}</Text>
+              </View>
+            )}
+            <View style={styles.identityTexts}>
+              <Text style={styles.identityName} numberOfLines={2}>
+                {settings?.name ?? '—'}
+              </Text>
+              <Text style={styles.identityHint} numberOfLines={2}>
+                {settings?.logoMediaId
+                  ? 'Votre logo apparaît sur vos tickets de vente.'
+                  : 'Ajoutez votre logo : il figurera en tête de vos tickets.'}
+              </Text>
+            </View>
+          </View>
+
+          <RowDivider />
           <InfoRow label="Nom" value={settings?.name ?? '—'} />
           <RowDivider />
           <InfoRow label="Adresse" value={settings?.address || 'Non renseignée'} />
@@ -144,7 +170,7 @@ export function SettingsScreen() {
         </Card>
 
         {/* --- Équipe ---------------------------------------------------- */}
-        <Card style={styles.card}>
+        <Card reveal={1} style={styles.card}>
           <SectionHeader
             title="L’équipe"
             caption={`${members.length} personne(s) avec un accès`}
@@ -219,7 +245,7 @@ export function SettingsScreen() {
         </Card>
 
         {/* --- Compte ---------------------------------------------------- */}
-        <Card style={styles.card}>
+        <Card reveal={2} style={styles.card}>
           <SectionHeader title="Votre compte" caption={profile.user.email} />
 
           <ListRow
@@ -310,6 +336,7 @@ function RestaurantSheet({ visible, settings, onClose, onDone }: RestaurantSheet
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [logoMediaId, setLogoMediaId] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -319,6 +346,7 @@ function RestaurantSheet({ visible, settings, onClose, onDone }: RestaurantSheet
     setName(settings?.name ?? '');
     setAddress(settings?.address ?? '');
     setPhone(settings?.phone ?? '');
+    setLogoMediaId(settings?.logoMediaId ?? null);
     setNameError(undefined);
     setError(null);
   }, [visible, settings]);
@@ -337,6 +365,7 @@ function RestaurantSheet({ visible, settings, onClose, onDone }: RestaurantSheet
         name: name.trim(),
         address: address.trim() === '' ? null : address.trim(),
         phone: phone.trim() === '' ? null : phone.trim(),
+        logoMediaId,
       });
       onDone();
     } catch (cause) {
@@ -355,6 +384,14 @@ function RestaurantSheet({ visible, settings, onClose, onDone }: RestaurantSheet
       onClose={onClose}
       actions={<Button label="Enregistrer" onPress={submit} loading={saving} />}
     >
+      <PhotoField
+        label="Logo du restaurant"
+        hint="Affiché en tête de vos tickets de vente. Format carré de préférence."
+        mediaId={logoMediaId}
+        onChange={setLogoMediaId}
+        round
+      />
+
       <Field
         label="Nom du restaurant"
         value={name}
@@ -583,6 +620,44 @@ const styles = StyleSheet.create({
   },
   card: {
     marginBottom: spacing.lg,
+  },
+  identity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingBottom: spacing.lg,
+  },
+  logo: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.backgroundAlt,
+  },
+  logoFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  logoInitials: {
+    fontFamily: fontFamily.bold,
+    fontSize: 20,
+    lineHeight: 26,
+    color: colors.textOnPrimary,
+  },
+  identityTexts: {
+    flex: 1,
+  },
+  identityName: {
+    ...typography.h3,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  identityHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textTertiary,
+    marginTop: 1,
   },
   infoRow: {
     flexDirection: 'row',

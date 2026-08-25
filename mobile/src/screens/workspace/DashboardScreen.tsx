@@ -12,11 +12,12 @@ import { paletteAt } from '../../components/charts/chartTheme';
 import { Segmented } from '../../components/workspace/Chips';
 import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
 import { StatCard } from '../../components/workspace/StatCard';
+import { Pulse, Reveal, useCountUp } from '../../components/workspace/Motion';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { ApiError } from '../../api/client';
 import { fetchCharts, fetchSummary } from '../../api/workspace/dashboard';
 import type { DashboardCharts, DashboardSummary } from '../../api/workspace/dashboard';
-import { EXPENSE_LABELS } from '../../api/workspace/expenses';
+import { EXPENSE_SHORT_LABELS } from '../../api/workspace/expenses';
 import type { ExpenseCategory } from '../../api/workspace/expenses';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import { UNIT_LABELS } from '../../api/workspace/stock';
@@ -76,6 +77,8 @@ export function DashboardScreen() {
     void load(Number(period)).finally(() => setRefreshing(false));
   }, [load, period]);
 
+  const countUp = useCountUp(summary?.today.sales ?? 0);
+
   const revenueTotal = useMemo(
     () => charts?.daily.reduce((sum, point) => sum + point.revenue, 0) ?? 0,
     [charts],
@@ -98,6 +101,8 @@ export function DashboardScreen() {
   }
 
   const netToday = summary.today.net;
+  // Le chiffre grimpe : on voit que la vente qu'on vient de saisir l'a bougé.
+  const animatedSales = Math.round(countUp);
   const hasActivity = revenueTotal > 0 || expensesTotal > 0 || summary.cash.totalIn > 0;
 
   return (
@@ -109,6 +114,7 @@ export function DashboardScreen() {
       }
     >
       {/* --- Journée en cours ------------------------------------------- */}
+      <Reveal index={0}>
       <LinearGradient
         colors={[colors.primary, colors.primaryDarker]}
         start={{ x: 0, y: 0 }}
@@ -119,7 +125,7 @@ export function DashboardScreen() {
           <View>
             <Text style={styles.heroCaption}>Recette du jour</Text>
             <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit>
-              {money(summary.today.sales)}
+              {money(animatedSales)}
             </Text>
           </View>
 
@@ -146,6 +152,7 @@ export function DashboardScreen() {
           <HeroStat label="Ce mois" value={money(summary.month.sales)} />
         </View>
       </LinearGradient>
+      </Reveal>
 
       {/* --- Premiers pas ----------------------------------------------- */}
       {!hasActivity && (
@@ -179,7 +186,7 @@ export function DashboardScreen() {
       )}
 
       {/* --- Indicateurs ------------------------------------------------- */}
-      <View style={styles.grid}>
+      <Reveal index={1} style={styles.grid}>
         <StatCard
           icon="wallet"
           label="Solde de caisse"
@@ -196,9 +203,9 @@ export function DashboardScreen() {
           tone={summary.credits.totalOutstanding > 0 ? 'warning' : 'neutral'}
           onPress={() => navigate('credits')}
         />
-      </View>
+      </Reveal>
 
-      <View style={styles.grid}>
+      <Reveal index={2} style={styles.grid}>
         <StatCard
           icon="box"
           label="Valeur du stock"
@@ -219,7 +226,7 @@ export function DashboardScreen() {
           tone={summary.staff.salaryBalanceDue > 0 ? 'warning' : 'neutral'}
           onPress={() => navigate('staff')}
         />
-      </View>
+      </Reveal>
 
       {/* --- Période ----------------------------------------------------- */}
       <View style={styles.periodRow}>
@@ -227,6 +234,7 @@ export function DashboardScreen() {
       </View>
 
       {/* --- Recette et dépenses ---------------------------------------- */}
+      <Reveal index={3}>
       <ChartCard
         title="Recette et dépenses"
         subtitle="Touchez la courbe pour lire un jour"
@@ -258,8 +266,10 @@ export function DashboardScreen() {
           ]}
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Heures de pointe -------------------------------------------- */}
+      <Reveal index={4}>
       <ChartCard
         title="Heures de pointe"
         subtitle="Quand vos clients passent commande"
@@ -276,8 +286,10 @@ export function DashboardScreen() {
           height={160}
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Jours de la semaine ----------------------------------------- */}
+      <Reveal index={5}>
       <ChartCard
         title="Vos meilleurs jours"
         subtitle="Recette cumulée par jour de la semaine"
@@ -293,8 +305,10 @@ export function DashboardScreen() {
           height={150}
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Modes de règlement ------------------------------------------ */}
+      <Reveal index={6}>
       <ChartCard
         title="Comment vos clients paient"
         subtitle="Part de chaque mode de règlement"
@@ -310,22 +324,26 @@ export function DashboardScreen() {
           emptyLabel="Aucune vente sur la période."
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Postes de dépense ------------------------------------------- */}
+      <Reveal index={7}>
       <ChartCard title="Où part l’argent" subtitle="Dépenses par poste">
         <DonutChart
           centerCaption="Total dépenses"
           formatValue={(value) => formatCompact(value)}
           slices={charts.expensesByCategory.map((slice, index) => ({
-            label: EXPENSE_LABELS[slice.category as ExpenseCategory] ?? slice.category,
+            label: EXPENSE_SHORT_LABELS[slice.category as ExpenseCategory] ?? slice.category,
             value: slice.total,
             color: paletteAt(index + 1),
           }))}
           emptyLabel="Aucune dépense sur la période."
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Plats vedettes ----------------------------------------------- */}
+      <Reveal index={8}>
       <ChartCard title="Vos plats vedettes" subtitle="Classés par chiffre d’affaires">
         <RankBars
           items={charts.topDishes.map((dish) => ({
@@ -336,9 +354,11 @@ export function DashboardScreen() {
           formatValue={money}
         />
       </ChartCard>
+      </Reveal>
 
       {/* --- Alertes ------------------------------------------------------ */}
       {charts.lowStock.length > 0 && (
+        <Reveal index={9}>
         <Card style={styles.alertCard}>
           <SectionHeader
             title="Stock à surveiller"
@@ -364,9 +384,11 @@ export function DashboardScreen() {
             </View>
           ))}
         </Card>
+        </Reveal>
       )}
 
       {charts.topDebtors.length > 0 && (
+        <Reveal index={10}>
         <Card style={styles.alertCard}>
           <SectionHeader
             title="Qui vous doit de l’argent"
@@ -392,6 +414,7 @@ export function DashboardScreen() {
             </View>
           ))}
         </Card>
+        </Reveal>
       )}
     </ScrollView>
   );

@@ -126,7 +126,7 @@ export function StaffScreen() {
           />
         }
       >
-        <Card style={styles.summary}>
+        <Card reveal={0} style={styles.summary}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Masse salariale</Text>
@@ -185,7 +185,7 @@ export function StaffScreen() {
                 }
               />
             ) : (
-              <Card>
+              <Card reveal={1}>
                 {employees.map((employee, index) => (
                   <View key={employee.id}>
                     {index > 0 && <RowDivider />}
@@ -329,7 +329,7 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
         caption={`${presentCount}/${employees.length} présent(s) · ${saved.length} déjà enregistré(s)`}
       />
 
-      <Card>
+      <Card reveal={2}>
         {employees.map((employee, index) => {
           const status = statuses[employee.id];
 

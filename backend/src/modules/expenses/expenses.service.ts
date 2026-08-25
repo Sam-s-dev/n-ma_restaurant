@@ -3,7 +3,7 @@ import { offsetOf, paginate, type Paginated } from '../../core/pagination';
 import { query, queryOne } from '../../db/pool';
 import { withTransaction, type Tx } from '../../db/transaction';
 import { round2, round3 } from '../../utils/money';
-import { recordMovement, reverseMovements } from '../cash/cash.service';
+import { assertCashAvailable, recordMovement, reverseMovements } from '../cash/cash.service';
 import { applyStockChange } from '../stock/stock.service';
 import type { CreateExpenseInput, ListExpensesInput } from './expenses.schemas';
 
@@ -103,6 +103,11 @@ export async function insertExpense(
   const quantity = params.quantity != null ? round3(params.quantity) : null;
   // Prix unitaire déduit du montant total et de la quantité achetée.
   const unitPrice = quantity && quantity > 0 ? round2(amount / quantity) : null;
+
+  // §7 — On ne sort pas d'une caisse plus qu'elle ne contient. Le gérant
+  // qui paie de sa poche enregistre d'abord un apport de capital ; sans ce
+  // contrôle, le solde partirait en négatif et ne voudrait plus rien dire.
+  await assertCashAvailable(tx, params.restaurantId, amount);
 
   const refRow = await tx.queryOne<{ reference: string }>(
     `SELECT next_document_reference($1, 'expense', 'D', $2::date) AS reference`,

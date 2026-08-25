@@ -17,26 +17,20 @@ export const createSaleSchema = z
     note: z.string().trim().max(500).optional(),
     soldAt: z.coerce.date().optional(),
 
-    // §8 — vente à crédit : le client est obligatoire.
-    customerId: z.string().uuid().optional(),
-    customerName: z.string().trim().min(2).max(120).optional(),
-    customerPhone: z
-      .string()
-      .trim()
-      .min(4)
-      .max(30)
-      .regex(/^[0-9+\s().-]+$/, 'Numéro de téléphone invalide.')
-      .optional(),
+    /**
+     * §8 — Vente à crédit : le client doit être une fiche déjà enregistrée.
+     *
+     * Autoriser un simple nom libre créait un client par vente : « Mariama »,
+     * « mariama », « Mariama D. » finissaient en trois dettes séparées, et
+     * plus personne ne savait qui devait combien le jour du remboursement.
+     */
+    customerId: z.string().uuid('Choisissez un client enregistré.').optional(),
     dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   })
-  .refine(
-    (data) =>
-      data.paymentMethod !== 'credit' || Boolean(data.customerId || data.customerName),
-    {
-      message: 'Une vente à crédit exige un client (existant ou nouveau).',
-      path: ['customerName'],
-    },
-  );
+  .refine((data) => data.paymentMethod !== 'credit' || Boolean(data.customerId), {
+    message: 'Une vente à crédit exige un client enregistré.',
+    path: ['customerId'],
+  });
 
 export const listSalesSchema = paginationSchema.merge(dateRangeSchema).extend({
   paymentMethod: z.enum(PAYMENT_METHODS).optional(),

@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '../Icon';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
@@ -9,20 +9,26 @@ interface WorkspaceHeaderProps {
   greeting: string;
   /** Solde de caisse, affiché en permanence comme le demande le §7. */
   balance: string;
+  /** Logo du restaurant, quand il en a chargé un (§3). */
+  logoUri?: string | null;
   onPressAccount: () => void;
+  onLogout: () => void;
 }
 
 /**
  * En-tête de l'espace restaurant.
  *
- * Pas de logo N'ma ici : cet écran appartient au restaurant, seul son nom
- * y figure. L'initiale sert d'avatar tant qu'aucun logo n'a été chargé.
+ * Pas de logo N'ma ici : cet écran appartient au restaurant, c'est son
+ * propre logo qui y figure. L'initiale sert d'avatar tant qu'aucun logo
+ * n'a été chargé.
  */
 export function WorkspaceHeader({
   restaurantName,
   greeting,
   balance,
+  logoUri,
   onPressAccount,
+  onLogout,
 }: WorkspaceHeaderProps) {
   const initials = restaurantName
     .split(/\s+/)
@@ -39,7 +45,11 @@ export function WorkspaceHeader({
         accessibilityRole="button"
         accessibilityLabel="Paramètres du restaurant"
       >
-        <Text style={styles.avatarText}>{initials || '?'}</Text>
+        {logoUri ? (
+          <Image source={{ uri: logoUri }} style={styles.avatarImage} resizeMode="cover" />
+        ) : (
+          <Text style={styles.avatarText}>{initials || '?'}</Text>
+        )}
       </Pressable>
 
       <View style={styles.headerTexts}>
@@ -57,6 +67,18 @@ export function WorkspaceHeader({
           {balance}
         </Text>
       </View>
+
+      {/* Déconnexion à portée de pouce : plusieurs personnes se relaient
+          sur le même téléphone en salle. */}
+      <Pressable
+        onPress={onLogout}
+        style={({ pressed }) => [styles.logout, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Se déconnecter"
+        hitSlop={8}
+      >
+        <Icon name="logout" size={17} color={colors.danger} strokeWidth={2.1} />
+      </Pressable>
     </View>
   );
 }
@@ -136,13 +158,27 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   avatar: {
     width: 46,
     height: 46,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: radius.md,
+  },
+  logout: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.dangerSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -172,7 +208,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
-    maxWidth: 150,
+    maxWidth: 130,
   },
   balanceLabel: {
     fontFamily: fontFamily.medium,

@@ -13,6 +13,9 @@ const API = process.env.API_URL ?? 'http://localhost:4000';
 const SUPER_EMAIL = process.env.SEED_SUPERADMIN_EMAIL ?? 'admin@exemple.com';
 const SUPER_PASSWORD = process.env.SEED_SUPERADMIN_PASSWORD ?? 'motdepasse-super-admin-a-changer';
 
+/** Fonds de caisse posé par le gérant avant la première dépense (§7). */
+const CAPITAL = 500_000;
+
 let passed = 0;
 let failed = 0;
 
@@ -288,9 +291,38 @@ async function main(): Promise<void> {
   const stockItemId: string = stockItem.body?.id;
 
   // ---------------------------------------------------------------------
-  section('8. Caisse — état initial (§7)');
+  section('8. Caisse — état initial et apport de capital (§7)');
   let balance = await call('GET', '/api/cash/balance', { token });
   check('solde initial à 0', balance.body?.balance === 0, balance.body);
+
+  // Une caisse vide ne peut rien payer : toute sortie est refusée tant que
+  // le gérant n'a pas mis d'argent dedans.
+  const tooEarly = await call('POST', '/api/expenses', {
+    token,
+    body: { amount: 1000, category: 'bill', description: 'Facture prématurée' },
+  });
+  check('dépense refusée sur caisse vide (422)', tooEarly.status === 422, tooEarly.body);
+  check(
+    'le message oriente vers l’apport',
+    typeof tooEarly.body?.error?.message === 'string' &&
+      tooEarly.body.error.message.includes('apport'),
+    tooEarly.body?.error?.message,
+  );
+
+  const capital = await call('POST', '/api/cash/contributions', {
+    token,
+    body: { amount: CAPITAL, label: 'Fonds de caisse du matin' },
+  });
+  check('apport de capital enregistré', capital.status === 201, capital.body);
+  check('solde = apport', capital.body?.balance === CAPITAL, capital.body);
+
+  const capitalMovements = await call('GET', '/api/cash/movements?category=capital', { token });
+  check(
+    'l’apport est classé à part des ventes et des remboursements',
+    capitalMovements.body?.items?.length === 1 &&
+      capitalMovements.body.items[0].category === 'capital',
+    capitalMovements.body?.items,
+  );
 
   // ---------------------------------------------------------------------
   section('9. Dépense = achat de stock (§9 : − Caisse, + Stock)');
@@ -312,7 +344,7 @@ async function main(): Promise<void> {
   check('alerte stock bas levée (10 > 5)', stockAfter.body?.isLow === false, stockAfter.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse débitée : −20 000', balance.body?.balance === -20000, balance.body);
+  check('dépense : caisse débitée de 20 000', balance.body?.balance === CAPITAL - 20000, balance.body);
 
   const badPurchase = await call('POST', '/api/expenses', {
     token,
@@ -343,7 +375,7 @@ async function main(): Promise<void> {
   check('référence de ticket générée', /^V-\d{8}-\d{4}$/.test(cashSale.body?.reference), cashSale.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse créditée : −20 000 + 8 500 = −11 500', balance.body?.balance === -11500, balance.body);
+  check('vente encaissée : caisse créditée de 8 500', balance.body?.balance === CAPITAL - 11500, balance.body);
 
   const receipt = await call('GET', `/api/sales/${cashSale.body?.id}/receipt`, { token });
   check('ticket avec en-tête restaurant (§3)', receipt.body?.restaurant?.name?.includes('Chez Test'), receipt.body?.restaurant);
@@ -351,13 +383,31 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------------
   section('11. Vente à crédit (§8 : caisse inchangée)');
+  // Le client doit exister avant la vente : c'est ce qui rend la dette
+  // rattachable le jour du remboursement (§8).
+  const freeText = await call('POST', '/api/sales', {
+    token,
+    body: {
+      items: [{ dishId, quantity: 1 }],
+      paymentMethod: 'credit',
+      customerName: 'Un inconnu',
+    },
+  });
+  check('nom libre refuse la vente à crédit (400)', freeText.status === 400, freeText.body);
+
+  const customer = await call('POST', '/api/customers', {
+    token,
+    body: { fullName: 'Monsieur Diallo', phone: '+225 05 55 55 55' },
+  });
+  check('fiche client créée', customer.status === 201, customer.body);
+  const customerId: string = customer.body?.id;
+
   const creditSale = await call('POST', '/api/sales', {
     token,
     body: {
       items: [{ dishId, quantity: 4 }],
       paymentMethod: 'credit',
-      customerName: 'Monsieur Diallo',
-      customerPhone: '+225 05 55 55 55',
+      customerId,
     },
   });
   check('vente à crédit créée', creditSale.status === 201, creditSale.body);
@@ -365,7 +415,7 @@ async function main(): Promise<void> {
   check('montant dû = 14 000', creditSale.body?.credit?.amountDue === 14000, creditSale.body?.credit);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse INCHANGÉE après vente à crédit', balance.body?.balance === -11500, balance.body);
+  check('caisse INCHANGÉE après vente à crédit', balance.body?.balance === CAPITAL - 11500, balance.body);
 
   const noCustomer = await call('POST', '/api/sales', {
     token,
@@ -395,7 +445,7 @@ async function main(): Promise<void> {
   check('reste dû = 8 000', partial.body?.amountLeft === 8000, partial.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse : −11 500 + 6 000 = −5 500', balance.body?.balance === -5500, balance.body);
+  check('remboursement partiel : caisse créditée de 6 000', balance.body?.balance === CAPITAL - 5500, balance.body);
 
   const settle = await call('POST', `/api/credits/${creditId}/payments`, {
     token,
@@ -405,7 +455,7 @@ async function main(): Promise<void> {
   check('reste dû = 0', settle.body?.amountLeft === 0, settle.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse : −5 500 + 8 000 = 2 500', balance.body?.balance === 2500, balance.body);
+  check('solde du crédit : caisse créditée de 8 000', balance.body?.balance === CAPITAL + 2500, balance.body);
 
   // ---------------------------------------------------------------------
   section('13. Personnel (§4) et paiement de salaire (§10)');
@@ -444,7 +494,7 @@ async function main(): Promise<void> {
   check('reste dû = 40 000', salary.body?.balance?.balanceDue === 40000, salary.body?.balance);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse : 2 500 − 50 000 = −47 500', balance.body?.balance === -47500, balance.body);
+  check('salaire : caisse débitée de 50 000', balance.body?.balance === CAPITAL - 47500, balance.body);
 
   const salaryExpenses = await call('GET', '/api/expenses?category=salary', { token });
   check(
@@ -462,7 +512,7 @@ async function main(): Promise<void> {
   check('vente annulée', cancel.body?.status === 'cancelled', cancel.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse : −47 500 − 8 500 = −56 000', balance.body?.balance === -56000, balance.body);
+  check('vente annulée : caisse débitée de 8 500', balance.body?.balance === CAPITAL - 56000, balance.body);
 
   const cancelExpense = await call('POST', `/api/expenses/${purchase.body?.id}/cancel`, {
     token,
@@ -471,7 +521,7 @@ async function main(): Promise<void> {
   check('dépense annulée', cancelExpense.body?.cancelledAt !== null, cancelExpense.body);
 
   balance = await call('GET', '/api/cash/balance', { token });
-  check('caisse : −56 000 + 20 000 = −36 000', balance.body?.balance === -36000, balance.body);
+  check('dépense annulée : caisse recréditée de 20 000', balance.body?.balance === CAPITAL - 36000, balance.body);
 
   const stockReverted = await call('GET', `/api/stock/${stockItemId}`, { token });
   check('stock revenu à 0 kg', stockReverted.body?.quantity === 0, stockReverted.body);
@@ -484,13 +534,13 @@ async function main(): Promise<void> {
   });
   check(
     'somme des mouvements = solde',
-    Math.round((movements.body?.totals?.net ?? 0) * 100) === -3600000,
+    Math.round((movements.body?.totals?.net ?? 0) * 100) === (CAPITAL - 36000) * 100,
     movements.body?.totals,
   );
 
   const dashboard = await call('GET', '/api/dashboard/summary', { token });
   check('tableau de bord disponible', dashboard.status === 200, dashboard.body);
-  check('solde cohérent', dashboard.body?.cash?.balance === -36000, dashboard.body?.cash);
+  check('solde cohérent', dashboard.body?.cash?.balance === CAPITAL - 36000, dashboard.body?.cash);
   check('créances soldées', dashboard.body?.credits?.totalOutstanding === 0, dashboard.body?.credits);
 
   const trend = await call('GET', '/api/dashboard/trend?days=7', { token });
@@ -605,6 +655,67 @@ async function main(): Promise<void> {
     stealDish.body,
   );
 
+  section('15 ter. Portions comptées par plat (§5)');
+  // §5 — Portions comptées : la vente décompte, zéro sort le plat de la carte.
+  const counted = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: 'Alloco du jour', price: 2000, availableQuantity: 3 },
+  });
+  check('plat créé avec 3 portions', counted.body?.availableQuantity === 3, counted.body);
+  const countedId: string = counted.body?.id;
+
+  const tooMany = await call('POST', '/api/sales', {
+    token,
+    body: { items: [{ dishId: countedId, quantity: 4 }], paymentMethod: 'cash' },
+  });
+  check('vendre plus que le préparé est refusé (422)', tooMany.status === 422, tooMany.body);
+
+  const twoPortions = await call('POST', '/api/sales', {
+    token,
+    body: { items: [{ dishId: countedId, quantity: 2 }], paymentMethod: 'cash' },
+  });
+  check('vente de 2 portions acceptée', twoPortions.status === 201, twoPortions.body);
+
+  let countedState = await call('GET', `/api/menu/dishes/${countedId}`, { token });
+  check('il reste 1 portion', countedState.body?.availableQuantity === 1, countedState.body);
+  check('le plat reste à la carte', countedState.body?.isAvailable === true, countedState.body);
+
+  const lastPortion = await call('POST', '/api/sales', {
+    token,
+    body: { items: [{ dishId: countedId, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  check('dernière portion vendue', lastPortion.status === 201, lastPortion.body);
+
+  countedState = await call('GET', `/api/menu/dishes/${countedId}`, { token });
+  check('quantité à 0', countedState.body?.availableQuantity === 0, countedState.body);
+  check(
+    'le plat sort automatiquement de la carte',
+    countedState.body?.isAvailable === false,
+    countedState.body,
+  );
+
+  const backOnMenu = await call('PATCH', `/api/menu/dishes/${countedId}/availability`, {
+    token,
+    body: { isAvailable: true },
+  });
+  check(
+    'impossible de le remettre à la carte sans portions (409)',
+    backOnMenu.status === 409,
+    backOnMenu.body,
+  );
+
+  const restocked = await call('PATCH', `/api/menu/dishes/${countedId}`, {
+    token,
+    body: { availableQuantity: 5 },
+  });
+  check('réapprovisionnement à 5', restocked.body?.availableQuantity === 5, restocked.body);
+  check(
+    'saisir la quantité suffit à le remettre en vente',
+    restocked.body?.isAvailable === true,
+    restocked.body,
+  );
+
+  // ---------------------------------------------------------------------
   section('16. Équipe et invitations (§2.b)');
   const invite = await call('POST', '/api/users/invitations', {
     token,
@@ -634,7 +745,7 @@ async function main(): Promise<void> {
   const colleagueBalance = await call('GET', '/api/cash/balance', { token: colleagueToken });
   check(
     'le collègue a les mêmes droits (accès caisse)',
-    colleagueBalance.body?.balance === -36000,
+    colleagueBalance.body?.balance === CAPITAL - 30000,
     colleagueBalance.body,
   );
 
@@ -701,7 +812,7 @@ async function main(): Promise<void> {
   });
   check(
     'toutes les données sont retrouvées après réactivation',
-    dataIntact.body?.balance === -36000,
+    dataIntact.body?.balance === CAPITAL - 30000,
     dataIntact.body,
   );
 

@@ -41,6 +41,15 @@ export const EXPENSE_LABELS: Record<ExpenseCategory, string> = {
 };
 
 /**
+ * Versions courtes pour les légendes de graphiques, où la colonne fait une
+ * centaine de points : « Achat de stock » s'y coupait en « Achat de st… ».
+ */
+export const EXPENSE_SHORT_LABELS: Record<ExpenseCategory, string> = {
+  ...EXPENSE_LABELS,
+  stock_purchase: 'Achats',
+};
+
+/**
  * Catégories saisissables ici. Le salaire en est absent : il s'enregistre
  * depuis la fiche employé pour que l'historique de paie reste juste (§4),
  * règle que le backend applique aussi de son côté.

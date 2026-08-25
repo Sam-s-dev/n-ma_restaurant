@@ -14,6 +14,11 @@ export const createDishSchema = z.object({
   photoMediaId: z.string().uuid().nullable().optional(),
   price: z.coerce.number().min(0).max(9_999_999_999),
   isAvailable: z.boolean().default(true),
+  /**
+   * §5 — Portions préparées. `null` laisse le plat vendable sans limite
+   * (préparé à la commande) ; un nombre le fait décompter à chaque vente.
+   */
+  availableQuantity: z.coerce.number().int().min(0).max(99_999).nullable().optional(),
 });
 
 export const updateDishSchema = createDishSchema.partial();

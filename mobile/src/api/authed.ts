@@ -63,6 +63,14 @@ export async function authed<T>(path: string, options: AuthedOptions = {}): Prom
   }
 }
 
+/**
+ * Renouvellement exposé pour l'envoi d'images, qui n'utilise pas `authed`
+ * (multipart, et non JSON) mais doit profiter de la même file unique.
+ */
+export function renewTokens(): Promise<Tokens> {
+  return renew();
+}
+
 async function renew(): Promise<Tokens> {
   if (refreshing) return refreshing;
 

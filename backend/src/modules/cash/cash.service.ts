@@ -1,10 +1,17 @@
+import { unprocessable } from '../../core/errors';
 import { offsetOf, paginate, type Paginated } from '../../core/pagination';
 import { query, queryOne } from '../../db/pool';
 import { withTransaction, type Tx } from '../../db/transaction';
 import { round2 } from '../../utils/money';
-import type { AdjustCashInput, ListMovementsInput } from './cash.schemas';
+import type { AdjustCashInput, ContributeCashInput, ListMovementsInput } from './cash.schemas';
 
-export type CashCategory = 'sale' | 'credit_payment' | 'expense' | 'salary' | 'adjustment';
+export type CashCategory =
+  | 'sale'
+  | 'credit_payment'
+  | 'expense'
+  | 'salary'
+  | 'adjustment'
+  | 'capital';
 export type CashSource = 'sale' | 'credit_payment' | 'expense' | 'salary_payment' | 'manual';
 export type PaymentMethod = 'cash' | 'mobile_money' | 'card' | 'bank_transfer';
 
@@ -224,6 +231,11 @@ export async function adjust(
   input: AdjustCashInput,
 ): Promise<CashBalance> {
   await withTransaction(async (tx) => {
+    // Un retrait de correction ne peut pas vider la caisse au-delà du réel.
+    if (input.direction === 'out') {
+      await assertCashAvailable(tx, restaurantId, input.amount);
+    }
+
     await recordMovement(tx, {
       restaurantId,
       direction: input.direction,
@@ -236,6 +248,81 @@ export async function adjust(
     });
   });
   return getBalance(restaurantId);
+}
+
+/**
+ * §7 — Apport ou retrait de capital.
+ *
+ * Le gérant met de l'argent personnel dans la caisse pour démarrer la
+ * journée ou couvrir un achat. Volontairement distinct de `adjustment`
+ * (qui corrige une erreur de saisie) et de `credit_payment` (qui vient
+ * d'un client) : sans cette séparation, le tableau de bord compterait cet
+ * argent comme une recette de l'activité.
+ */
+export async function contribute(
+  restaurantId: string,
+  userId: string,
+  input: ContributeCashInput,
+): Promise<CashBalance> {
+  await withTransaction(async (tx) => {
+    if (input.direction === 'out') {
+      await assertCashAvailable(tx, restaurantId, input.amount);
+    }
+
+    await recordMovement(tx, {
+      restaurantId,
+      direction: input.direction,
+      amount: input.amount,
+      category: 'capital',
+      label: input.label,
+      sourceType: 'manual',
+      paymentMethod: input.paymentMethod,
+      ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+      createdBy: userId,
+    });
+  });
+  return getBalance(restaurantId);
+}
+
+/**
+ * Refuse une sortie d'argent supérieure au solde.
+ *
+ * On ne peut pas sortir d'une caisse plus que ce qu'elle contient : le
+ * solde négatif ne veut rien dire pour un gérant. Le message renvoie le
+ * montant disponible et oriente vers l'apport de capital, qui est la
+ * façon prévue de renflouer la caisse.
+ *
+ * Le verrou `FOR UPDATE` sérialise deux sorties simultanées, sans quoi
+ * elles pourraient toutes deux passer le contrôle avant d'être écrites.
+ */
+export async function assertCashAvailable(
+  tx: Tx,
+  restaurantId: string,
+  amount: number,
+): Promise<void> {
+  const row = await tx.queryOne<{ balance: number; currency_symbol: string }>(
+    `SELECT b.balance, r.currency_symbol
+       FROM cash_balances b
+       JOIN restaurants r ON r.id = b.restaurant_id
+      WHERE b.restaurant_id = $1
+      FOR UPDATE OF b`,
+    [restaurantId],
+  );
+
+  const balance = row?.balance ?? 0;
+  if (round2(amount) <= balance) return;
+
+  const symbol = row?.currency_symbol ?? '';
+  throw unprocessable(
+    `Solde insuffisant : il y a ${formatAmount(balance)} ${symbol} en caisse. ` +
+      `Enregistrez d’abord un apport pour couvrir cette sortie.`,
+  );
+}
+
+/** Séparateur de milliers, sans dépendre de l'ICU du conteneur. */
+function formatAmount(value: number): string {
+  const fixed = Math.abs(value) % 1 === 0 ? String(Math.round(value)) : value.toFixed(2);
+  return fixed.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 /** Répartition par mode de paiement, utile pour le contrôle de fin de journée. */

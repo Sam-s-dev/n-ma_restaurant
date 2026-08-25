@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -7,10 +7,16 @@ import { Icon } from '../../components/Icon';
 import { Chips, Segmented } from '../../components/workspace/Chips';
 import { AmountField, Field } from '../../components/workspace/Field';
 import { EmptyState, ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
+import { Pulse, Reveal } from '../../components/workspace/Motion';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { Sheet } from '../../components/workspace/Sheet';
 import { ApiError } from '../../api/client';
-import { CATEGORY_LABELS, adjustCash, listMovements } from '../../api/workspace/cash';
+import {
+  CATEGORY_LABELS,
+  adjustCash,
+  contributeCash,
+  listMovements,
+} from '../../api/workspace/cash';
 import type { CashCategory, CashDirection, MovementsPage } from '../../api/workspace/cash';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import { parseAmount } from '../../utils/money';
@@ -32,7 +38,8 @@ const CATEGORIES = [
   { value: 'credit_payment' as const, label: 'Remboursements' },
   { value: 'expense' as const, label: 'Dépenses' },
   { value: 'salary' as const, label: 'Salaires' },
-  { value: 'adjustment' as const, label: 'Ajustements' },
+  { value: 'capital' as const, label: 'Apports' },
+  { value: 'adjustment' as const, label: 'Corrections' },
 ];
 
 /**
@@ -52,6 +59,7 @@ export function CashScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [capitalOpen, setCapitalOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -97,6 +105,7 @@ export function CashScreen() {
           />
         }
       >
+        <Reveal index={0}>
         <LinearGradient
           colors={[colors.iconGreen, '#1F7A45']}
           start={{ x: 0, y: 0 }}
@@ -132,6 +141,38 @@ export function CashScreen() {
             </View>
           </View>
         </LinearGradient>
+        </Reveal>
+
+        {/* §7 — Une caisse vide ne peut rien payer : l'apport est la porte
+            d'entrée de l'argent du gérant, et il est mis en avant tant que
+            le solde ne couvre rien. */}
+        <Reveal index={1}>
+        <Pulse active={balance <= 0}>
+        <Pressable
+          style={[styles.capitalCard, balance <= 0 && styles.capitalCardUrgent]}
+          onPress={() => setCapitalOpen(true)}
+          accessibilityRole="button"
+        >
+          <View style={[styles.capitalIcon, balance <= 0 && styles.capitalIconUrgent]}>
+            <Icon
+              name="arrow-down"
+              size={18}
+              color={balance <= 0 ? colors.textOnPrimary : colors.iconGreen}
+              strokeWidth={2.3}
+            />
+          </View>
+          <View style={styles.capitalTexts}>
+            <Text style={styles.capitalTitle}>Mettre de l’argent en caisse</Text>
+            <Text style={styles.capitalHint} numberOfLines={2}>
+              {balance <= 0
+                ? 'La caisse est vide : aucune dépense ne passera tant qu’elle n’est pas approvisionnée.'
+                : 'Votre apport personnel, compté à part des recettes de l’activité.'}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={16} color={colors.textTertiary} strokeWidth={2.3} />
+        </Pressable>
+        </Pulse>
+        </Reveal>
 
         <SectionHeader
           title="Mouvements"
@@ -151,7 +192,7 @@ export function CashScreen() {
             message="Chaque vente encaissée, dépense ou salaire viendra s’inscrire ici automatiquement."
           />
         ) : (
-          <Card>
+          <Card reveal={2}>
             {movements.map((movement, index) => {
               const incoming = movement.direction === 'in';
               return (
@@ -180,13 +221,10 @@ export function CashScreen() {
         )}
 
         <View style={styles.adjustAction}>
-          <Button
-            label="Corriger le solde"
-            onPress={() => setAdjustOpen(true)}
-            variant="secondary"
-          />
+          <Button label="Corriger le solde" onPress={() => setAdjustOpen(true)} variant="ghost" />
           <Text style={styles.adjustHint}>
-            Fonds de caisse initial, erreur de saisie : l’écriture s’ajoute, rien n’est effacé.
+            La correction sert à rattraper une erreur de saisie. L’écriture s’ajoute au grand
+            livre, rien n’est jamais effacé.
           </Text>
         </View>
       </ScrollView>
@@ -201,7 +239,136 @@ export function CashScreen() {
           void load();
         }}
       />
+
+      <CapitalSheet
+        visible={capitalOpen}
+        onClose={() => setCapitalOpen(false)}
+        onDone={(message) => {
+          setCapitalOpen(false);
+          refreshBalance();
+          notify(message);
+          void load();
+        }}
+      />
     </View>
+  );
+}
+
+interface CapitalSheetProps {
+  visible: boolean;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}
+
+/**
+ * §7 — Apport ou retrait du gérant.
+ *
+ * Distinct de la correction : ici l'argent existe réellement et change de
+ * mains. Le classer à part évite que le tableau de bord compte comme une
+ * recette de l'activité ce qui sort de la poche du gérant.
+ */
+function CapitalSheet({ visible, onClose, onDone }: CapitalSheetProps) {
+  const { currency, money, balance } = useWorkspace();
+  const [direction, setDirection] = useState<CashDirection>('in');
+  const [amount, setAmount] = useState('');
+  const [label, setLabel] = useState('');
+  const [method, setMethod] = useState('cash');
+  const [amountError, setAmountError] = useState<string | undefined>();
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setDirection('in');
+    setAmount('');
+    setLabel('');
+    setMethod('cash');
+    setAmountError(undefined);
+    setError(null);
+  }, [visible]);
+
+  async function submit() {
+    const value = parseAmount(amount);
+    if (value === null || value <= 0) {
+      setAmountError('Saisissez un montant supérieur à zéro.');
+      return;
+    }
+
+    setAmountError(undefined);
+    setSaving(true);
+    setError(null);
+    try {
+      await contributeCash({
+        direction,
+        amount: value,
+        paymentMethod: method,
+        ...(label.trim().length >= 3 ? { label: label.trim() } : {}),
+      });
+      onDone(direction === 'in' ? 'Apport enregistré' : 'Retrait enregistré');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Enregistrement impossible.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Sheet
+      visible={visible}
+      title={direction === 'in' ? 'Mettre de l’argent en caisse' : 'Retirer de l’argent'}
+      subtitle={`Solde actuel : ${money(balance)}`}
+      error={error}
+      onClose={onClose}
+      actions={<Button label="Enregistrer" onPress={submit} loading={saving} />}
+    >
+      <Segmented
+        options={[
+          { value: 'in', label: 'J’apporte' },
+          { value: 'out', label: 'Je retire' },
+        ]}
+        value={direction}
+        onChange={setDirection}
+        style={styles.directionSwitch}
+      />
+
+      <Text style={styles.capitalNote}>
+        {direction === 'in'
+          ? 'Cet argent vient de vous, pas de vos clients : il apparaîtra comme « Apport » dans le grand livre et ne gonflera pas votre chiffre d’affaires.'
+          : 'Vous reprenez de l’argent de la caisse. Le retrait est tracé comme tel.'}
+      </Text>
+
+      <AmountField
+        label="Montant"
+        value={amount}
+        onChangeText={(value) => {
+          setAmount(value);
+          if (amountError) setAmountError(undefined);
+        }}
+        placeholder="0"
+        suffix={currency.symbol}
+        error={amountError}
+      />
+
+      <Text style={styles.blockLabel}>Sous quelle forme</Text>
+      <View style={styles.methodRow}>
+        <Chips
+          options={[
+            { value: 'cash', label: 'Espèces' },
+            { value: 'mobile_money', label: 'Mobile Money' },
+            { value: 'bank_transfer', label: 'Virement' },
+          ]}
+          value={method}
+          onChange={setMethod}
+        />
+      </View>
+
+      <Field
+        label="Motif (facultatif)"
+        value={label}
+        onChangeText={setLabel}
+        placeholder={direction === 'in' ? 'Fonds de caisse du matin' : 'Retrait personnel'}
+      />
+    </Sheet>
   );
 }
 
@@ -354,6 +521,58 @@ const styles = StyleSheet.create({
     height: 30,
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
     marginHorizontal: spacing.md,
+  },
+  capitalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  capitalCardUrgent: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  capitalIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    backgroundColor: colors.pastelGreen,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  capitalIconUrgent: {
+    backgroundColor: colors.primary,
+  },
+  capitalTexts: {
+    flex: 1,
+  },
+  capitalTitle: {
+    ...typography.bodyStrong,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  capitalHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textTertiary,
+  },
+  capitalNote: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textSecondary,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  methodRow: {
+    marginBottom: spacing.lg,
   },
   categoryRow: {
     marginTop: spacing.md,

@@ -128,19 +128,30 @@ export function BarChart({
         })}
       </View>
 
+      {/*
+        Étiquettes posées en absolu plutôt que dans une colonne par barre :
+        avec vingt-quatre barres, un créneau ne fait qu'une dizaine de
+        points et « 12h » s'y réduisait à « 1… ». Ici chaque étiquette est
+        centrée sur sa barre et déborde librement des deux côtés — sans
+        risque de chevauchement, puisqu'une seule sur `labelEvery` est
+        affichée.
+      */}
       <View style={styles.labels}>
-        {data.map((item, index) => (
-          <View key={`label-${item.label}-${index}`} style={styles.labelSlot}>
-            {index % labelEvery === 0 && (
-              <Text
-                style={[styles.label, index === shown && hasData && styles.labelActive]}
-                numberOfLines={1}
-              >
-                {item.label}
-              </Text>
-            )}
-          </View>
-        ))}
+        {data.map((item, index) =>
+          index % labelEvery === 0 ? (
+            <Text
+              key={`label-${item.label}-${index}`}
+              style={[
+                styles.label,
+                { left: `${((index + 0.5) / data.length) * 100}%` },
+                index === shown && hasData && styles.labelActive,
+              ]}
+              numberOfLines={1}
+            >
+              {item.label}
+            </Text>
+          ) : null,
+        )}
       </View>
     </View>
   );
@@ -180,15 +191,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   labels: {
-    flexDirection: 'row',
-    gap: 3,
+    height: 14,
     marginTop: spacing.sm,
   },
-  labelSlot: {
-    flex: 1,
-    alignItems: 'center',
-  },
   label: {
+    position: 'absolute',
+    // Décalage d'une demi-largeur : l'étiquette se centre sur sa barre.
+    marginLeft: -19,
+    width: 38,
+    textAlign: 'center',
     fontFamily: fontFamily.medium,
     fontSize: 10,
     lineHeight: 14,

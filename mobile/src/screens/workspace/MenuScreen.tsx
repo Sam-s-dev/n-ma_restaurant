@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
@@ -9,8 +9,9 @@ import { AmountField, Field } from '../../components/workspace/Field';
 import { EmptyState, ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { SearchField } from '../../components/workspace/SearchField';
+import { PhotoField } from '../../components/workspace/PhotoField';
 import { Sheet } from '../../components/workspace/Sheet';
-import { ApiError } from '../../api/client';
+import { ApiError, mediaUrl } from '../../api/client';
 import {
   createCategory,
   createDish,
@@ -191,7 +192,7 @@ export function MenuScreen() {
             }
           />
         ) : (
-          <Card>
+          <Card reveal={0}>
             {visible.map((dish, index) => (
               <View key={dish.id}>
                 {index > 0 && <RowDivider />}
@@ -201,22 +202,30 @@ export function MenuScreen() {
                     onPress={() => setDishSheet({ open: true, dish })}
                     accessibilityRole="button"
                   >
-                    <View
-                      style={[
-                        styles.dishBullet,
-                        {
-                          backgroundColor: dish.isAvailable
-                            ? colors.pastelGreen
-                            : colors.backgroundAlt,
-                        },
-                      ]}
-                    >
-                      <Icon
-                        name="menu-book"
-                        size={17}
-                        color={dish.isAvailable ? colors.iconGreen : colors.textTertiary}
+                    {dish.photoMediaId ? (
+                      <Image
+                        source={{ uri: mediaUrl(dish.photoMediaId) as string }}
+                        style={[styles.dishPhoto, !dish.isAvailable && styles.dishPhotoOff]}
+                        resizeMode="cover"
                       />
-                    </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.dishBullet,
+                          {
+                            backgroundColor: dish.isAvailable
+                              ? colors.pastelGreen
+                              : colors.backgroundAlt,
+                          },
+                        ]}
+                      >
+                        <Icon
+                          name="menu-book"
+                          size={17}
+                          color={dish.isAvailable ? colors.iconGreen : colors.textTertiary}
+                        />
+                      </View>
+                    )}
 
                     <View style={styles.dishTexts}>
                       <Text style={styles.dishName} numberOfLines={1}>
@@ -224,6 +233,9 @@ export function MenuScreen() {
                       </Text>
                       <Text style={styles.dishMeta} numberOfLines={1}>
                         {dish.categoryName ?? 'Sans catégorie'} · {money(dish.price)}
+                        {dish.availableQuantity !== null
+                          ? ` · ${dish.availableQuantity} portion(s)`
+                          : ''}
                       </Text>
                     </View>
                   </Pressable>
@@ -300,6 +312,8 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState<string>('none');
+  const [photoMediaId, setPhotoMediaId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState('');
   const [errors, setErrors] = useState<{ name?: string; price?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -310,6 +324,8 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
     setPrice(dish ? String(dish.price) : '');
     setDescription(dish?.description ?? '');
     setCategoryId(dish?.categoryId ?? 'none');
+    setPhotoMediaId(dish?.photoMediaId ?? null);
+    setQuantity(dish?.availableQuantity !== null && dish ? String(dish.availableQuantity) : '');
     setErrors({});
     setError(null);
   }, [visible, dish]);
@@ -325,11 +341,17 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
     setSaving(true);
     setError(null);
     try {
+      // Champ laissé vide = quantité non suivie : le plat reste vendable
+      // sans limite, ce qui convient aux plats préparés à la commande.
+      const parsedQuantity = quantity.trim() === '' ? null : Math.max(0, Math.trunc(parseAmount(quantity) ?? 0));
+
       const payload = {
         name: name.trim(),
         price: value as number,
         categoryId: categoryId === 'none' ? null : categoryId,
         description: description.trim() === '' ? null : description.trim(),
+        photoMediaId,
+        availableQuantity: parsedQuantity,
       };
 
       if (dish) {
@@ -361,6 +383,13 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
         </>
       }
     >
+      <PhotoField
+        label="Photo du plat"
+        hint="Elle apparaîtra sur la carte et sur l’écran de vente."
+        mediaId={photoMediaId}
+        onChange={setPhotoMediaId}
+      />
+
       <Field
         label="Nom du plat"
         value={name}
@@ -382,6 +411,19 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
         placeholder="0"
         suffix={currency.symbol}
         error={errors.price}
+      />
+
+      <AmountField
+        label="Portions préparées"
+        value={quantity}
+        onChangeText={setQuantity}
+        placeholder="Illimité"
+        suffix="portion(s)"
+        hint={
+          dish && dish.availableQuantity === 0
+            ? 'Ce plat est épuisé. Saisissez la quantité préparée pour le remettre en vente.'
+            : 'Chaque vente en retire une. À zéro, le plat sort de la carte. Laissez vide pour ne pas compter.'
+        }
       />
 
       <Text style={styles.blockLabel}>Catégorie</Text>
@@ -635,6 +677,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dishPhoto: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundAlt,
+  },
+  dishPhotoOff: {
+    opacity: 0.45,
   },
   dishTexts: {
     flex: 1,

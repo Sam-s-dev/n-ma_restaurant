@@ -121,7 +121,7 @@ export function ExpensesScreen() {
           />
         }
       >
-        <Card style={styles.summary}>
+        <Card reveal={0} style={styles.summary}>
           <Text style={styles.summaryLabel}>Total des dépenses affichées</Text>
           <Text style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit>
             {money(page?.totals.amount ?? 0)}
@@ -170,7 +170,7 @@ export function ExpensesScreen() {
             action={<Button label="Enregistrer une dépense" onPress={() => setFormOpen(true)} />}
           />
         ) : (
-          <Card>
+          <Card reveal={1}>
             {expenses.map((expense, index) => {
               const style = CATEGORY_ICONS[expense.category] ?? CATEGORY_ICONS.other;
               const cancelled = Boolean(expense.cancelledAt);

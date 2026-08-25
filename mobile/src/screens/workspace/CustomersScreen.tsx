@@ -108,7 +108,7 @@ export function CustomersScreen() {
           />
         }
       >
-        <Card style={styles.summary}>
+        <Card reveal={0} style={styles.summary}>
           <Text style={styles.summaryLabel}>Total dû par vos clients</Text>
           <Text style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit>
             {money(totalDue)}
@@ -147,7 +147,7 @@ export function CustomersScreen() {
             message="Les clients apparaissent automatiquement dès qu’une vente est enregistrée à crédit."
           />
         ) : (
-          <Card>
+          <Card reveal={1}>
             {customers.map((customer, index) => (
               <View key={customer.id}>
                 {index > 0 && <RowDivider />}
