@@ -9,7 +9,7 @@ import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/L
 import { PhotoField } from '../../components/workspace/PhotoField';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { Sheet } from '../../components/workspace/Sheet';
-import { ApiError, mediaUrl } from '../../api/client';
+import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import {
   changePassword,
   createMember,
@@ -133,7 +133,7 @@ export function SettingsScreen() {
           <View style={styles.identity}>
             {settings?.logoMediaId ? (
               <Image
-                source={{ uri: mediaUrl(settings.logoMediaId) as string }}
+                source={{ uri: mediaUrl(settings.logoMediaId, THUMB.small) as string }}
                 style={styles.logo}
                 resizeMode="cover"
               />

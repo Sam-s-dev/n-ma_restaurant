@@ -42,9 +42,9 @@ interface ApiResult<T = any> {
 async function call<T = any>(
   method: string,
   path: string,
-  options: { body?: unknown; token?: string } = {},
+  options: { body?: unknown; token?: string; headers?: Record<string, string> } = {},
 ): Promise<ApiResult<T>> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
 
@@ -64,6 +64,60 @@ async function call<T = any>(
     }
   }
   return { status: response.status, body: body as T };
+}
+
+/**
+ * Image de test, fabriquée sur place.
+ *
+ * Un damier plutôt qu'un aplat : une image d'une seule couleur se comprime
+ * si bien que la vignette pèserait autant que l'original, et le test ne
+ * prouverait rien. Le bruit reproduit le comportement d'une photo réelle.
+ */
+async function pngFixture(width: number, height: number): Promise<Buffer> {
+  const { default: sharp } = await import('sharp');
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < width * height; i += 1) {
+    const x = i % width;
+    const y = Math.floor(i / width);
+    pixels[i * 3] = (x * 7 + y * 13) % 256;
+    pixels[i * 3 + 1] = (x * 3 + y * 5) % 256;
+    pixels[i * 3 + 2] = (x ^ y) % 256;
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+/** Envoi d'un fichier en multipart, comme le fait l'application. */
+async function upload(
+  path: string,
+  token: string,
+  content: Buffer,
+  fileName: string,
+): Promise<ApiResult> {
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(content)], { type: 'image/png' }), fileName);
+
+  const response = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
+/** Lecture d'une image : on s'intéresse au poids et au type, pas au JSON. */
+async function binary(
+  path: string,
+): Promise<{ status: number; bytes: number; mimeType: string | null; etag: string | null }> {
+  const response = await fetch(`${API}${path}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    status: response.status,
+    bytes: buffer.byteLength,
+    mimeType: response.headers.get('content-type'),
+    etag: response.headers.get('etag'),
+  };
 }
 
 async function main(): Promise<void> {
@@ -714,6 +768,59 @@ async function main(): Promise<void> {
     restocked.body?.isAvailable === true,
     restocked.body,
   );
+
+  // ---------------------------------------------------------------------
+  section('15 quater. Vignettes d’images');
+  /*
+   * Mesuré sur un restaurant réel : neuf plats photographiés au téléphone
+   * représentaient 4 Mo à charger pour un seul écran de vente, dont une
+   * photo de 1,8 Mo affichée dans un cadre de 100 points. Le serveur sert
+   * désormais des versions réduites, fabriquées à la première demande.
+   */
+  const photo = await pngFixture(1200, 900);
+  const photoUpload = await upload('/api/media', token, photo, 'plat.png');
+  check('photo envoyée', photoUpload.status === 201, photoUpload.body);
+
+  const photoId = photoUpload.body?.id as string;
+
+  const fullSize = await binary(`/api/media/${photoId}`);
+  check('original servi tel quel', fullSize.bytes === photo.byteLength, {
+    servi: fullSize.bytes,
+    envoyé: photo.byteLength,
+  });
+
+  const thumb = await binary(`/api/media/${photoId}?w=96`);
+  check('vignette 96 fabriquée', thumb.status === 200, thumb.status);
+  check('vignette convertie en WebP', thumb.mimeType === 'image/webp', thumb.mimeType);
+  check('vignette plus légère que l’original', thumb.bytes < fullSize.bytes, {
+    vignette: thumb.bytes,
+    original: fullSize.bytes,
+  });
+
+  const again = await binary(`/api/media/${photoId}?w=96`);
+  check('relue à l’identique au second appel', again.bytes === thumb.bytes, {
+    premier: thumb.bytes,
+    second: again.bytes,
+  });
+
+  const notModified = await call('GET', `/api/media/${photoId}?w=96`, {
+    headers: { 'If-None-Match': thumb.etag ?? '' },
+  });
+  check('ETag respecté (304)', notModified.status === 304, notModified.status);
+
+  // Une largeur libre laisserait fabriquer des milliers de variantes en
+  // bouclant sur ?w=1,2,3… : hors liste, on retombe sur l'original.
+  const oddWidth = await binary(`/api/media/${photoId}?w=137`);
+  check('largeur hors liste : original servi', oddWidth.bytes === fullSize.bytes, {
+    servi: oddWidth.bytes,
+    original: fullSize.bytes,
+  });
+
+  const junkWidth = await binary(`/api/media/${photoId}?w=abc`);
+  check('largeur illisible : original servi', junkWidth.bytes === fullSize.bytes, {
+    servi: junkWidth.bytes,
+    original: fullSize.bytes,
+  });
 
   // ---------------------------------------------------------------------
   section('16. Équipe : création directe d’un compte (§2.b)');

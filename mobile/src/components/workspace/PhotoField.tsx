@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Icon } from '../Icon';
-import { ApiError, mediaUrl } from '../../api/client';
+import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import { uploadImage } from '../../api/media';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
@@ -34,7 +35,7 @@ export function PhotoField({ label, hint, mediaId, onChange, round = false }: Ph
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const preview = mediaUrl(mediaId);
+  const preview = mediaUrl(mediaId, THUMB.medium);
 
   async function pick(source: 'library' | 'camera') {
     setError(null);
@@ -68,9 +69,10 @@ export function PhotoField({ label, hint, mediaId, onChange, round = false }: Ph
       if (!asset) return;
 
       setBusy(true);
-      const uploaded = await uploadImage(asset.uri, {
-        mimeType: asset.mimeType,
-        fileName: asset.fileName,
+      const reduced = await downscale(asset.uri, asset.width);
+      const uploaded = await uploadImage(reduced ?? asset.uri, {
+        mimeType: reduced ? 'image/jpeg' : asset.mimeType,
+        fileName: reduced ? 'photo.jpg' : asset.fileName,
       });
       onChange(uploaded.id);
     } catch (cause) {
@@ -144,6 +146,39 @@ export function PhotoField({ label, hint, mediaId, onChange, round = false }: Ph
       {!error && Boolean(hint) && <Text style={styles.hint}>{hint}</Text>}
     </View>
   );
+}
+
+/**
+ * Largeur maximale conservée à l'envoi.
+ *
+ * Un téléphone récent produit des images de 3 000 à 4 000 points de large,
+ * soit plusieurs mégaoctets. Rien dans l'application n'affiche une photo
+ * au-delà de la largeur de l'écran : 1 600 points laissent de la marge pour
+ * un futur agrandissement tout en divisant le poids par cinq ou six.
+ *
+ * L'enjeu n'est pas que l'affichage — le serveur fabrique déjà ses propres
+ * vignettes — mais l'envoi lui-même, qui se fait depuis un téléphone en
+ * réseau mobile, et le stockage : la base conserve l'original.
+ */
+const MAX_UPLOAD_WIDTH = 1600;
+
+/**
+ * Réduit l'image avant l'envoi, et renvoie `null` si ce n'est pas
+ * nécessaire ou pas possible — l'original part alors tel quel, comme avant.
+ * Un échec de compression ne doit jamais empêcher d'ajouter une photo.
+ */
+async function downscale(uri: string, width: number | undefined): Promise<string | null> {
+  if (width !== undefined && width <= MAX_UPLOAD_WIDTH) return null;
+
+  try {
+    const context = ImageManipulator.manipulate(uri);
+    context.resize({ width: MAX_UPLOAD_WIDTH });
+    const rendered = await context.renderAsync();
+    const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.75 });
+    return saved.uri;
+  } catch {
+    return null;
+  }
 }
 
 /**

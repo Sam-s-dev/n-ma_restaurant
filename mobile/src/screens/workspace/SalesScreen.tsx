@@ -13,7 +13,7 @@ import { Receipt } from '../../components/workspace/Receipt';
 import { Reveal } from '../../components/workspace/Motion';
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
-import { ApiError, mediaUrl } from '../../api/client';
+import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import { useResource } from '../../api/cache';
 import { createCustomer, listCustomers } from '../../api/workspace/customers';
 import type { Customer } from '../../api/workspace/customers';
@@ -231,7 +231,7 @@ function NewSale() {
                   <View style={styles.dishImageFrame}>
                     {dish.photoMediaId ? (
                       <Image
-                        source={{ uri: mediaUrl(dish.photoMediaId) as string }}
+                        source={{ uri: mediaUrl(dish.photoMediaId, THUMB.medium) as string }}
                         style={styles.dishImage}
                         resizeMode="cover"
                       />

@@ -11,7 +11,7 @@ import { ErrorState, LoadingState } from '../../components/workspace/ScreenState
 import { SearchField } from '../../components/workspace/SearchField';
 import { PhotoField } from '../../components/workspace/PhotoField';
 import { Sheet } from '../../components/workspace/Sheet';
-import { ApiError, mediaUrl } from '../../api/client';
+import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import { useResource } from '../../api/cache';
 import {
   createCategory,
@@ -202,7 +202,7 @@ export function MenuScreen() {
                   >
                     {dish.photoMediaId ? (
                       <Image
-                        source={{ uri: mediaUrl(dish.photoMediaId) as string }}
+                        source={{ uri: mediaUrl(dish.photoMediaId, THUMB.small) as string }}
                         style={[styles.dishPhoto, !dish.isAvailable && styles.dishPhotoOff]}
                         resizeMode="cover"
                       />

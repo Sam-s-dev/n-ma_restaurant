@@ -15,7 +15,7 @@ import { Button } from '../../components/Button';
 import { PromptModal } from '../../components/PromptModal';
 import { StatusBadge } from '../../components/StatusBadge';
 import { TextField } from '../../components/TextField';
-import { ApiError, mediaUrl } from '../../api/client';
+import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import {
   activateRestaurant,
   disableRestaurant,
@@ -300,7 +300,7 @@ function RestaurantCard({
   onActivate: () => void;
   onDisable: () => void;
 }) {
-  const logo = mediaUrl(restaurant.logoMediaId);
+  const logo = mediaUrl(restaurant.logoMediaId, THUMB.small);
   const initials = restaurant.name
     .split(/\s+/)
     .filter(Boolean)

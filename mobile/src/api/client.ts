@@ -17,11 +17,35 @@ const DEFAULT_API_URL = 'https://n-ma-restaurant.onrender.com';
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, '');
 
 /**
+ * Largeurs de vignettes servies par l'API. Toute autre valeur renverrait
+ * l'original — inutilement lourd.
+ */
+export const THUMB = {
+  /** Pastille de liste, avatar. */
+  small: 96,
+  /** Vignette d'un plat dans la grille de vente. */
+  medium: 320,
+  /** Affichage sur toute la largeur de l'écran. */
+  large: 720,
+} as const;
+
+/**
  * Adresse absolue d'une image stockée en base. Les réponses de l'API ne
  * contiennent qu'un chemin relatif, inutilisable tel quel dans `<Image>`.
+ *
+ * `width` demande une version réduite. Sans elle, on reçoit la photo telle
+ * que l'appareil l'a prise : mesuré sur un restaurant réel, neuf plats
+ * pesaient 4 Mo pour un seul écran, soit une demi-minute d'attente sur un
+ * réseau mobile. Les mêmes vignettes en 320 points tiennent en quelques
+ * dizaines de kilo-octets.
  */
-export function mediaUrl(mediaId: string | null | undefined): string | null {
-  return mediaId ? `${API_URL}/api/media/${mediaId}` : null;
+export function mediaUrl(
+  mediaId: string | null | undefined,
+  width?: number,
+): string | null {
+  if (!mediaId) return null;
+  const base = `${API_URL}/api/media/${mediaId}`;
+  return width ? `${base}?w=${width}` : base;
 }
 
 /** Code d'erreur renvoyé par le backend (voir backend/src/core/errors.ts). */

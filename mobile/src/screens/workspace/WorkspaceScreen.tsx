@@ -12,7 +12,7 @@ import type { ToastMessage } from '../../components/workspace/Toast';
 import { fetchSummary } from '../../api/workspace/dashboard';
 import { fetchProfile } from '../../api/workspace/settings';
 import { saveProfile } from '../../api/session';
-import { mediaUrl } from '../../api/client';
+import { mediaUrl, THUMB } from '../../api/client';
 import type { Profile } from '../../api/auth';
 import { formatMoney } from '../../utils/money';
 import type { Currency } from '../../utils/money';
@@ -183,7 +183,7 @@ export function WorkspaceScreen({
               restaurantName={profile.restaurant.name}
               greeting={`Bonjour ${profile.user.fullName.split(' ')[0] ?? ''}`}
               balance={money(balance)}
-              logoUri={mediaUrl(profile.restaurant.logoMediaId)}
+              logoUri={mediaUrl(profile.restaurant.logoMediaId, THUMB.small)}
               onPressAccount={() => navigate('settings')}
               onLogout={() => setLogoutOpen(true)}
             />

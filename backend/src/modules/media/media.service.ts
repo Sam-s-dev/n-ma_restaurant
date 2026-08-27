@@ -79,6 +79,85 @@ export async function readMedia(
 }
 
 /**
+ * Largeurs de vignettes acceptées.
+ *
+ * La liste est fermée, et c'est le point important : une largeur libre
+ * laisserait n'importe qui fabriquer des milliers de variantes en bouclant
+ * sur `?w=1,2,3…`, chacune stockée en base. Trois tailles couvrent tous les
+ * usages de l'application — la pastille d'un écran de liste, la vignette
+ * d'un plat dans la grille de vente, et l'affichage en pleine largeur.
+ */
+const ALLOWED_WIDTHS = [96, 320, 720] as const;
+
+export function isAllowedWidth(width: number): boolean {
+  return (ALLOWED_WIDTHS as readonly number[]).includes(width);
+}
+
+/**
+ * Réduction d'image, chargée à la demande.
+ *
+ * `sharp` embarque un binaire natif. S'il venait à manquer — image de base
+ * changée, architecture inattendue — un import en tête de fichier ferait
+ * tomber l'API entière au démarrage. Chargé ici, l'échec reste local : on
+ * sert alors l'original, exactement comme avant cette fonctionnalité.
+ */
+async function shrink(
+  content: Buffer,
+  width: number,
+): Promise<{ content: Buffer; mimeType: string } | null> {
+  try {
+    const { default: sharp } = await import('sharp');
+    const resized = await sharp(content)
+      .rotate() // Respecte l'orientation EXIF, sinon les photos prises de côté sortent couchées.
+      .resize({ width, withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toBuffer();
+    return { content: resized, mimeType: 'image/webp' };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Version réduite d'une image, fabriquée à la première demande puis
+ * conservée. Les appels suivants la relisent sans retoucher au pixel.
+ *
+ * Si la réduction échoue — format exotique, binaire absent — on renvoie
+ * l'original : une image lourde vaut mieux qu'un cadre vide.
+ */
+export async function readMediaVariant(
+  id: string,
+  width: number,
+): Promise<{ content: Buffer; mimeType: string; checksum: string }> {
+  const cached = await queryOne<{ content: Buffer; mime_type: string; checksum: string }>(
+    'SELECT content, mime_type, checksum FROM media_variants WHERE media_id = $1 AND width = $2',
+    [id, width],
+  );
+  if (cached) {
+    return { content: cached.content, mimeType: cached.mime_type, checksum: cached.checksum };
+  }
+
+  const original = await readMedia(id);
+  const smaller = await shrink(original.content, width);
+  if (!smaller) return original;
+
+  const checksum = createHash('sha256').update(smaller.content).digest('hex');
+
+  // `ON CONFLICT DO NOTHING` : deux appareils qui ouvrent l'écran en même
+  // temps demandent la même vignette, et la fabriquent tous les deux. Le
+  // second arrive après le premier — ce n'est pas une erreur, le contenu
+  // est identique.
+  await query(
+    `INSERT INTO media_variants (media_id, width, mime_type, byte_size, checksum, content)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (media_id, width) DO NOTHING`,
+    [id, width, smaller.mimeType, smaller.content.byteLength, checksum, smaller.content],
+  );
+
+  return { content: smaller.content, mimeType: smaller.mimeType, checksum };
+}
+
+/**
  * Supprime les images d'un restaurant qui ne sont plus référencées.
  * Appelé après un changement de logo ou de photo de plat.
  */

@@ -1,5 +1,5 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { API_URL } from '../../api/client';
+import { API_URL, THUMB } from '../../api/client';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import type { Receipt as ReceiptData } from '../../api/workspace/sales';
 import { formatMoney } from '../../utils/money';
@@ -33,7 +33,7 @@ export function Receipt({ data }: ReceiptProps) {
       <View style={styles.header}>
         {restaurant.logoUrl ? (
           <Image
-            source={{ uri: `${API_URL}${restaurant.logoUrl}` }}
+            source={{ uri: `${API_URL}${restaurant.logoUrl}?w=${THUMB.small}` }}
             style={styles.logo}
             resizeMode="contain"
           />

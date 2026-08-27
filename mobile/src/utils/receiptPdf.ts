@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { API_URL } from '../api/client';
+import { API_URL, THUMB } from '../api/client';
 import { PAYMENT_LABELS } from '../api/workspace/sales';
 import type { Receipt } from '../api/workspace/sales';
 import { formatMoney } from './money';
@@ -37,7 +37,10 @@ async function embedLogo(logoUrl: string | null): Promise<string | null> {
   if (!logoUrl) return null;
 
   try {
-    const response = await fetch(`${API_URL}${logoUrl}`);
+    // Le logo est imprimé dans un carré de 58 px : inutile de faire
+    // voyager la photo d'origine, qui pèse souvent plusieurs centaines
+    // de kilo-octets et devrait ensuite être encodée en base64.
+    const response = await fetch(`${API_URL}${logoUrl}?w=${THUMB.small}`);
     if (!response.ok) return null;
 
     const blob = await response.blob();
