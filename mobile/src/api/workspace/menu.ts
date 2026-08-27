@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { invalidateCache } from '../cache';
 
 /** §5 — Catégories et plats du menu. */
 export interface Category {
@@ -39,15 +40,21 @@ export async function listCategories(): Promise<Category[]> {
 }
 
 export function createCategory(name: string, position = 0): Promise<Category> {
-  return authed<Category>('/api/menu/categories', { method: 'POST', body: { name, position } });
+  return authed<Category>('/api/menu/categories', {
+    method: 'POST',
+    body: { name, position },
+  }).then(afterMenuChange);
 }
 
 export function renameCategory(id: string, name: string): Promise<Category> {
-  return authed<Category>(`/api/menu/categories/${id}`, { method: 'PATCH', body: { name } });
+  return authed<Category>(`/api/menu/categories/${id}`, {
+    method: 'PATCH',
+    body: { name },
+  }).then(afterMenuChange);
 }
 
 export function deleteCategory(id: string): Promise<void> {
-  return authed<void>(`/api/menu/categories/${id}`, { method: 'DELETE' });
+  return authed<void>(`/api/menu/categories/${id}`, { method: 'DELETE' }).then(afterMenuChange);
 }
 
 export async function listDishes(
@@ -65,21 +72,32 @@ export async function listDishes(
 }
 
 export function createDish(payload: DishPayload): Promise<Dish> {
-  return authed<Dish>('/api/menu/dishes', { method: 'POST', body: payload });
+  return authed<Dish>('/api/menu/dishes', { method: 'POST', body: payload }).then(afterMenuChange);
+}
+
+/**
+ * Toute écriture sur la carte périme le menu mis en cache — et le tableau
+ * de bord, qui compte les plats et les ruptures.
+ */
+function afterMenuChange<T>(result: T): T {
+  invalidateCache('menu:', 'dashboard:');
+  return result;
 }
 
 export function updateDish(id: string, payload: Partial<DishPayload>): Promise<Dish> {
-  return authed<Dish>(`/api/menu/dishes/${id}`, { method: 'PATCH', body: payload });
+  return authed<Dish>(`/api/menu/dishes/${id}`, { method: 'PATCH', body: payload }).then(
+    afterMenuChange,
+  );
 }
 
 export function setDishAvailability(id: string, isAvailable: boolean): Promise<Dish> {
   return authed<Dish>(`/api/menu/dishes/${id}/availability`, {
     method: 'PATCH',
     body: { isAvailable },
-  });
+  }).then(afterMenuChange);
 }
 
 /** Archive le plat s'il a déjà été vendu, le supprime sinon (côté backend). */
 export function deleteDish(id: string): Promise<void> {
-  return authed<void>(`/api/menu/dishes/${id}`, { method: 'DELETE' });
+  return authed<void>(`/api/menu/dishes/${id}`, { method: 'DELETE' }).then(afterMenuChange);
 }

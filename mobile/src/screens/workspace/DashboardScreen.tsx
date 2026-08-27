@@ -14,7 +14,7 @@ import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/L
 import { StatCard } from '../../components/workspace/StatCard';
 import { Pulse, Reveal, useCountUp } from '../../components/workspace/Motion';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
-import { ApiError } from '../../api/client';
+import { useResource } from '../../api/cache';
 import { fetchCharts, fetchSummary } from '../../api/workspace/dashboard';
 import type { DashboardCharts, DashboardSummary } from '../../api/workspace/dashboard';
 import { EXPENSE_SHORT_LABELS } from '../../api/workspace/expenses';
@@ -47,35 +47,35 @@ const PERIODS = [
 export function DashboardScreen() {
   const { money, navigate } = useWorkspace();
   const [period, setPeriod] = useState<Period>('14');
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [charts, setCharts] = useState<DashboardCharts | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(
-    async (days: number) => {
-      setError(null);
-      try {
-        const [nextSummary, nextCharts] = await Promise.all([fetchSummary(), fetchCharts(days)]);
-        setSummary(nextSummary);
-        setCharts(nextCharts);
-      } catch (cause) {
-        setError(
-          cause instanceof ApiError ? cause.message : 'Impossible de charger le tableau de bord.',
-        );
-      }
-    },
-    [],
+  /*
+   * Résumé et séries sont demandés ensemble, en parallèle. Le cache rend
+   * l'affichage instantané au retour sur l'onglet : les chiffres connus
+   * apparaissent tout de suite, la requête part quand même pour les
+   * rafraîchir.
+   */
+  const fetchAll = useCallback(async () => {
+    const [nextSummary, nextCharts] = await Promise.all([
+      fetchSummary(),
+      fetchCharts(Number(period)),
+    ]);
+    return { summary: nextSummary, charts: nextCharts };
+  }, [period]);
+
+  const resource = useResource<{ summary: DashboardSummary; charts: DashboardCharts }>(
+    `dashboard:${period}`,
+    fetchAll,
   );
 
-  useEffect(() => {
-    void load(Number(period));
-  }, [load, period]);
+  const summary = resource.data?.summary ?? null;
+  const charts = resource.data?.charts ?? null;
+  const error = resource.error;
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    void load(Number(period)).finally(() => setRefreshing(false));
-  }, [load, period]);
+    void resource.refresh().finally(() => setRefreshing(false));
+  }, [resource]);
 
   const countUp = useCountUp(summary?.today.sales ?? 0);
 
@@ -92,7 +92,7 @@ export function DashboardScreen() {
     return (
       <ScrollView contentContainerStyle={styles.content}>
         {error ? (
-          <ErrorState message={error} onRetry={() => void load(Number(period))} />
+          <ErrorState message={error} onRetry={() => void resource.refresh()} />
         ) : (
           <LoadingState label="Chargement de vos chiffres…" />
         )}

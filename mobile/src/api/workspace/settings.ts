@@ -70,11 +70,31 @@ export async function listMembers(): Promise<Member[]> {
   return items;
 }
 
+/**
+ * §2.b — Le gérant crée lui-même le compte du collègue et lui communique
+ * ses identifiants de vive voix. Plus rapide et plus sûr qu'un code
+ * d'invitation à transmettre, que le collègue devait ensuite savoir
+ * utiliser.
+ */
+export function createMember(payload: {
+  fullName: string;
+  email: string;
+  password: string;
+  phone?: string | null;
+}): Promise<Member> {
+  return authed<Member>('/api/users', { method: 'POST', body: payload });
+}
+
 export function updateMember(
   id: string,
   payload: { fullName?: string; phone?: string | null; isActive?: boolean },
 ): Promise<Member> {
   return authed<Member>(`/api/users/${id}`, { method: 'PATCH', body: payload });
+}
+
+/** Supprime le compte, ou le désactive s'il a déjà saisi des écritures. */
+export function removeMember(id: string): Promise<void> {
+  return authed<void>(`/api/users/${id}`, { method: 'DELETE' });
 }
 
 export async function listInvitations(): Promise<Invitation[]> {

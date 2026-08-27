@@ -19,7 +19,7 @@ import {
 } from '../../api/workspace/expenses';
 import type { Expense, ExpenseCategory, ExpensesPage } from '../../api/workspace/expenses';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
-import { UNIT_LABELS, listStock } from '../../api/workspace/stock';
+import { STOCK_UNITS, UNIT_LABELS, createStockItem, listStock } from '../../api/workspace/stock';
 import type { StockItem } from '../../api/workspace/stock';
 import { formatQuantity, parseAmount } from '../../utils/money';
 import { formatRelativeDay, todayISO } from '../../utils/date';
@@ -298,6 +298,9 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
   const [expenseDate, setExpenseDate] = useState(todayISO());
   const [payment, setPayment] = useState('cash');
   const [stockItemId, setStockItemId] = useState<string | null>(null);
+  const [newProduct, setNewProduct] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newUnit, setNewUnit] = useState<string>('kg');
   const [quantity, setQuantity] = useState('');
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [errors, setErrors] = useState<{ amount?: string; description?: string; stock?: string }>({});
@@ -312,6 +315,9 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
     setExpenseDate(todayISO());
     setPayment('cash');
     setStockItemId(null);
+    setNewProduct(false);
+    setNewName('');
+    setNewUnit('kg');
     setQuantity('');
     setErrors({});
     setError(null);
@@ -325,13 +331,19 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
 
   async function submit() {
     const value = parseAmount(amount);
+    const purchasedQuantity = parseAmount(quantity) ?? 0;
     const next: { amount?: string; description?: string; stock?: string } = {};
 
     if (value === null || value <= 0) next.amount = 'Saisissez un montant supérieur à zéro.';
     if (description.trim().length < 1) next.description = 'Décrivez la dépense.';
-    if (isPurchase && !stockItemId) next.stock = 'Choisissez le produit acheté.';
-    if (isPurchase && (parseAmount(quantity) ?? 0) <= 0) {
-      next.stock = next.stock ?? 'Indiquez la quantité achetée.';
+
+    if (isPurchase) {
+      if (newProduct) {
+        if (newName.trim().length < 1) next.stock = 'Donnez un nom au produit acheté.';
+      } else if (!stockItemId) {
+        next.stock = 'Choisissez le produit acheté.';
+      }
+      if (purchasedQuantity <= 0) next.stock = next.stock ?? 'Indiquez la quantité achetée.';
     }
 
     setErrors(next);
@@ -340,15 +352,22 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
     setSaving(true);
     setError(null);
     try {
+      let targetId = stockItemId;
+
+      // Le produit est créé à quantité zéro : c'est la dépense qui l'y fait
+      // entrer juste après, avec son prix d'achat réel.
+      if (isPurchase && newProduct) {
+        const created = await createStockItem({ name: newName.trim(), unit: newUnit, quantity: 0 });
+        targetId = created.id;
+      }
+
       await createExpense({
         amount: value as number,
         category,
         description: description.trim(),
         expenseDate: /^\d{4}-\d{2}-\d{2}$/.test(expenseDate) ? expenseDate : todayISO(),
         paymentMethod: payment,
-        ...(isPurchase && stockItemId
-          ? { stockItemId, quantity: parseAmount(quantity) as number }
-          : {}),
+        ...(isPurchase && targetId ? { stockItemId: targetId, quantity: purchasedQuantity } : {}),
       });
       onDone();
     } catch (cause) {
@@ -393,25 +412,82 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
       {isPurchase && (
         <View style={styles.purchaseBlock}>
           <Text style={styles.purchaseNote}>
-            La quantité achetée entrera automatiquement en stock.
+            Le montant sort de la caisse et la quantité achetée entre en stock, en une seule
+            opération.
           </Text>
 
-          <Text style={styles.blockLabel}>Produit</Text>
-          {stockItems.length === 0 ? (
-            <Text style={styles.noStock}>
-              Aucun produit en stock. Créez-le d’abord dans le module Stock.
-            </Text>
-          ) : (
-            <View style={styles.spaced}>
-              <Chips
-                options={stockItems.map((item) => ({ value: item.id, label: item.name }))}
-                value={stockItemId ?? ''}
-                onChange={(value) => {
-                  setStockItemId(value);
+          <Text style={styles.blockLabel}>Produit acheté</Text>
+
+          {/*
+            Création du produit sur place. Renvoyer le gérant vers le module
+            Stock au milieu d'une saisie de dépense lui faisait perdre son
+            montant : on achète un sac d'oignons sans avoir prévu la fiche.
+          */}
+          {newProduct ? (
+            <View style={styles.quickCreate}>
+              <Field
+                label="Nom du nouveau produit"
+                value={newName}
+                onChangeText={(value) => {
+                  setNewName(value);
                   if (errors.stock) setErrors((prev) => ({ ...prev, stock: undefined }));
                 }}
+                placeholder="Oignons"
+                autoFocus
               />
+
+              <Text style={styles.blockLabel}>Unité</Text>
+              <View style={styles.spaced}>
+                <Chips
+                  options={STOCK_UNITS.map((value) => ({
+                    value,
+                    label: UNIT_LABELS[value] ?? value,
+                  }))}
+                  value={newUnit}
+                  onChange={setNewUnit}
+                />
+              </View>
+
+              <Pressable
+                onPress={() => setNewProduct(false)}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={styles.quickCancel}>Choisir un produit existant</Text>
+              </Pressable>
             </View>
+          ) : (
+            <>
+              {stockItems.length > 0 && (
+                <View style={styles.spaced}>
+                  <Chips
+                    options={stockItems.map((item) => ({ value: item.id, label: item.name }))}
+                    value={stockItemId ?? ''}
+                    onChange={(value) => {
+                      setStockItemId(value);
+                      if (errors.stock) setErrors((prev) => ({ ...prev, stock: undefined }));
+                    }}
+                  />
+                </View>
+              )}
+
+              <Pressable
+                onPress={() => {
+                  setNewProduct(true);
+                  setStockItemId(null);
+                  setErrors((prev) => ({ ...prev, stock: undefined }));
+                }}
+                style={styles.quickAdd}
+                accessibilityRole="button"
+              >
+                <Icon name="plus" size={15} color={colors.primary} strokeWidth={2.4} />
+                <Text style={styles.quickAddText}>
+                  {stockItems.length === 0
+                    ? 'Créer le produit acheté'
+                    : 'Le produit n’est pas dans la liste'}
+                </Text>
+              </Pressable>
+            </>
           )}
 
           <AmountField
@@ -422,7 +498,13 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
               if (errors.stock) setErrors((prev) => ({ ...prev, stock: undefined }));
             }}
             placeholder="0"
-            suffix={selectedItem ? (UNIT_LABELS[selectedItem.unit] ?? selectedItem.unit) : undefined}
+            suffix={
+      newProduct
+        ? (UNIT_LABELS[newUnit] ?? newUnit)
+        : selectedItem
+          ? (UNIT_LABELS[selectedItem.unit] ?? selectedItem.unit)
+          : undefined
+    }
             error={errors.stock}
           />
         </View>
@@ -558,11 +640,36 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
-  noStock: {
-    ...typography.small,
-    fontSize: 12,
-    color: colors.textTertiary,
+  quickCreate: {
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
     marginBottom: spacing.lg,
+  },
+  quickCancel: {
+    fontFamily: fontFamily.medium,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  quickAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    marginBottom: spacing.lg,
+  },
+  quickAddText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.primary,
   },
   detailAmount: {
     alignItems: 'center',

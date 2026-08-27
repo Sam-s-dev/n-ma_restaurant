@@ -7,11 +7,14 @@ import { radius } from '../../theme/layout';
 /**
  * Mouvements de l'espace restaurant.
  *
- * Le relief vient de vraies transformations en trois dimensions : les
- * éléments arrivent inclinés sur l'axe X, vus à travers une perspective,
- * puis se redressent. C'est la seule façon d'obtenir de la profondeur sans
- * embarquer un moteur 3D, qui pèserait plusieurs mégaoctets et viderait la
- * batterie pour un écran de caisse.
+ * Règle unique : **rien ne bouge horizontalement**. Ni au repos, ni à
+ * l'apparition. Le regard d'un utilisateur en train de remplir un
+ * formulaire est fixé sur un champ ; le moindre déplacement latéral est
+ * lu comme un défaut d'affichage, jamais comme une intention.
+ *
+ * Les entrées se font donc en fondu et en montée verticale, et seule une
+ * pression du doigt autorise un changement d'échelle — il est alors
+ * attendu, puisque provoqué.
  *
  * Tout passe par le pilote natif (opacité et transformations uniquement) :
  * l'animation continue de tourner même quand le fil JavaScript est occupé
@@ -27,25 +30,27 @@ interface RevealProps {
   index?: number;
   /** Distance de montée, en points. */
   distance?: number;
-  /** Inclinaison de départ, en degrés. Zéro pour un simple fondu. */
-  tilt?: number;
   duration?: number;
   style?: StyleProp<ViewStyle>;
 }
 
 /**
- * Entrée en cascade : l'élément monte, se redresse et apparaît.
+ * Entrée en cascade : l'élément monte et apparaît.
  *
- * Le mouvement se rejoue à chaque montage, donc à chaque retour sur
- * l'écran — c'est ce qui donne le sentiment que l'application « respire »
- * plutôt que d'afficher un écran figé.
+ * Le mouvement est strictement vertical, et c'est délibéré. La première
+ * version faisait aussi grandir la card (0,97 → 1) avec une légère
+ * inclinaison : les bords gauche et droit se déplaçaient alors de quelques
+ * points, et l'ensemble donnait l'impression de balancer latéralement —
+ * insupportable dans un formulaire, où le regard est fixé sur un champ.
+ *
+ * Une largeur qui bouge est toujours perçue comme une instabilité, jamais
+ * comme une animation. Seuls l'opacité et le déplacement vertical restent.
  */
 export function Reveal({
   children,
   index = 0,
-  distance = 18,
-  tilt = 8,
-  duration = 420,
+  distance = 14,
+  duration = 380,
   style,
 }: RevealProps) {
   const progress = useRef(new Animated.Value(0)).current;
@@ -68,25 +73,10 @@ export function Reveal({
         {
           opacity: progress,
           transform: [
-            // La perspective doit précéder les rotations, sinon l'inclinaison
-            // reste plate et le relief disparaît.
-            { perspective: 800 },
             {
               translateY: progress.interpolate({
                 inputRange: [0, 1],
                 outputRange: [distance, 0],
-              }),
-            },
-            {
-              rotateX: progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [`${tilt}deg`, '0deg'],
-              }),
-            },
-            {
-              scale: progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.97, 1],
               }),
             },
           ],
@@ -110,9 +100,11 @@ interface DepthPressableProps {
 /**
  * Surface qui s'enfonce sous le doigt.
  *
- * L'échelle et l'inclinaison sont infimes — on ne les remarque pas
- * consciemment — mais elles suffisent à confirmer l'appui sur un écran
- * tactile, où rien d'autre ne signale qu'on a bien touché la cible.
+ * L'échelle est infime — on ne la remarque pas consciemment — mais elle
+ * suffit à confirmer l'appui sur un écran tactile, où rien d'autre ne
+ * signale qu'on a bien touché la cible. Elle ne joue que pendant l'appui,
+ * jamais au repos : une mise en page qui bouge toute seule est perçue
+ * comme un défaut.
  */
 export function DepthPressable({
   children,
@@ -144,14 +136,7 @@ export function DepthPressable({
         style={[
           {
             transform: [
-              { perspective: 700 },
-              { scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.965] }) },
-              {
-                rotateX: press.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0deg', '4deg'],
-                }),
-              },
+              { scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.97] }) },
             ],
             opacity: press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.94] }),
           },
@@ -168,6 +153,10 @@ export function DepthPressable({
  * Battement lent, pour attirer l'œil sur ce qui réclame une action —
  * une caisse vide, un stock épuisé. Réservé à un seul élément à la fois :
  * si tout clignote, plus rien ne ressort.
+ *
+ * Le battement porte sur l'opacité et non sur la taille : un élément qui
+ * grandit et rétrécit en boucle décale ses voisins et donne l'impression
+ * que la page vibre.
  */
 export function Pulse({ children, active = true }: { children: React.ReactNode; active?: boolean }) {
   const beat = useRef(new Animated.Value(0)).current;
@@ -200,11 +189,7 @@ export function Pulse({ children, active = true }: { children: React.ReactNode; 
 
   return (
     <Animated.View
-      style={{
-        transform: [
-          { scale: beat.interpolate({ inputRange: [0, 1], outputRange: [1, 1.035] }) },
-        ],
-      }}
+      style={{ opacity: beat.interpolate({ inputRange: [0, 1], outputRange: [1, 0.72] }) }}
     >
       {children}
     </Animated.View>
@@ -328,13 +313,7 @@ export function SceneSwitch({ sceneKey, children }: { sceneKey: string; children
         {
           opacity: progress,
           transform: [
-            { perspective: 1000 },
-            {
-              translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }),
-            },
-            {
-              scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.985, 1] }),
-            },
+            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) },
           ],
         },
       ]}

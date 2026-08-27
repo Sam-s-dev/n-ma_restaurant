@@ -10,6 +10,7 @@ import { AdminRestaurantsScreen } from '../screens/admin/AdminRestaurantsScreen'
 import type { LoginResponse, Profile } from '../api/auth';
 import type { AdminLoginResponse } from '../api/superadmin';
 import { setAuthTokens, setSessionExpiredHandler } from '../api/authed';
+import { invalidateCache } from '../api/cache';
 import { clearSession, loadSession } from '../api/session';
 import { clearAdminSession, loadAdminSession } from '../api/adminSession';
 import type { StoredAdminSession } from '../api/adminSession';
@@ -65,6 +66,9 @@ export function RootNavigator({ onReady }: RootNavigatorProps) {
 
   const handleLogout = useCallback(async () => {
     setAuthTokens(null);
+    // Sans cela, les chiffres du restaurant précédent s'afficheraient une
+    // fraction de seconde sous le compte suivant.
+    invalidateCache();
     await clearSession().catch(() => undefined);
     setProfile(null);
   }, []);

@@ -12,6 +12,7 @@ import { SearchField } from '../../components/workspace/SearchField';
 import { PhotoField } from '../../components/workspace/PhotoField';
 import { Sheet } from '../../components/workspace/Sheet';
 import { ApiError, mediaUrl } from '../../api/client';
+import { useResource } from '../../api/cache';
 import {
   createCategory,
   createDish,
@@ -40,13 +41,11 @@ import { useWorkspace } from './WorkspaceContext';
 export function MenuScreen() {
   const { money, notify } = useWorkspace();
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [dishes, setDishes] = useState<Dish[]>([]);
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** Copie locale, pour la bascule optimiste « disponible / rupture ». */
+  const [overrides, setOverrides] = useState<Record<string, Dish>>({});
 
   const [dishSheet, setDishSheet] = useState<{ open: boolean; dish: Dish | null }>({
     open: false,
@@ -57,22 +56,21 @@ export function MenuScreen() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [nextCategories, nextDishes] = await Promise.all([listCategories(), listDishes()]);
-      setCategories(nextCategories);
-      setDishes(nextDishes);
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Chargement du menu impossible.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const menu = useResource<{ categories: Category[]; dishes: Dish[] }>('menu:list', async () => {
+    const [categories, dishes] = await Promise.all([listCategories(), listDishes()]);
+    return { categories, dishes };
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = useCallback(async () => {
+    setOverrides({});
+    await menu.refresh();
+  }, [menu]);
+
+  const categories = menu.data?.categories ?? [];
+  const dishes = useMemo(
+    () => (menu.data?.dishes ?? []).map((dish) => overrides[dish.id] ?? dish),
+    [menu.data, overrides],
+  );
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -85,17 +83,17 @@ export function MenuScreen() {
 
   async function toggleAvailability(dish: Dish) {
     // Mise à jour optimiste : la bascule doit être instantanée en service.
-    setDishes((current) =>
-      current.map((item) =>
-        item.id === dish.id ? { ...item, isAvailable: !item.isAvailable } : item,
-      ),
-    );
+    // Elle est tenue à part de la liste chargée, qui reste la référence.
+    setOverrides((current) => ({
+      ...current,
+      [dish.id]: { ...dish, isAvailable: !dish.isAvailable },
+    }));
 
     try {
       const updated = await setDishAvailability(dish.id, !dish.isAvailable);
-      setDishes((current) => current.map((item) => (item.id === dish.id ? updated : item)));
+      setOverrides((current) => ({ ...current, [dish.id]: updated }));
     } catch (cause) {
-      setDishes((current) => current.map((item) => (item.id === dish.id ? dish : item)));
+      setOverrides((current) => ({ ...current, [dish.id]: dish }));
       notify(cause instanceof ApiError ? cause.message : 'Changement impossible.', 'danger');
     }
   }
@@ -116,8 +114,8 @@ export function MenuScreen() {
     }
   }
 
-  if (loading) return <LoadingState label="Chargement du menu…" />;
-  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (menu.loading) return <LoadingState label="Chargement du menu…" />;
+  if (menu.error) return <ErrorState message={menu.error} onRetry={() => void load()} />;
 
   return (
     <View style={styles.flex}>

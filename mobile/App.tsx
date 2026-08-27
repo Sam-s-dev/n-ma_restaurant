@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { warmUpServer } from './src/api/client';
 import { useAppFonts } from './src/theme/fonts';
 
 // Appelé en portée globale, comme le préconise la doc Expo SDK 54 : l'écran
@@ -10,6 +11,16 @@ import { useAppFonts } from './src/theme/fonts';
 // première frame s'affiche avec la police système puis saute.
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 SplashScreen.setOptions({ duration: 400, fade: true });
+
+/*
+ * Réveil du serveur dès l'ouverture, sans rien attendre en retour.
+ *
+ * L'hébergement endort l'instance après un quart d'heure d'inactivité, et
+ * son redémarrage prend une vingtaine de secondes. Lancé ici, il se déroule
+ * pendant que l'utilisateur lit la page d'accueil et saisit ses
+ * identifiants : la connexion, elle, répond alors du premier coup.
+ */
+warmUpServer();
 
 export default function App() {
   const { fontsLoaded, fontError } = useAppFonts();

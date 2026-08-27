@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { invalidateCache } from '../cache';
 
 /** §9 — Dépenses. */
 export type ExpenseCategory = 'stock_purchase' | 'salary' | 'bill' | 'maintenance' | 'other';
@@ -93,9 +94,18 @@ export function createExpense(payload: {
   stockItemId?: string;
   quantity?: number;
 }): Promise<Expense> {
-  return authed<Expense>('/api/expenses', { method: 'POST', body: payload });
+  return authed<Expense>('/api/expenses', { method: 'POST', body: payload }).then((expense) => {
+    invalidateCache('dashboard:');
+    return expense;
+  });
 }
 
 export function cancelExpense(id: string, reason: string): Promise<Expense> {
-  return authed<Expense>(`/api/expenses/${id}/cancel`, { method: 'POST', body: { reason } });
+  return authed<Expense>(`/api/expenses/${id}/cancel`, {
+    method: 'POST',
+    body: { reason },
+  }).then((expense) => {
+    invalidateCache('dashboard:');
+    return expense;
+  });
 }

@@ -1,9 +1,10 @@
 import { badRequest, conflict, notFound } from '../../core/errors';
 import { buildUpdate } from '../../core/sqlBuilder';
 import { query, queryOne } from '../../db/pool';
+import { hashPassword } from '../../utils/password';
 import { generateOpaqueToken } from '../../utils/tokens';
 import { revokeAllSessions } from '../auth/session.service';
-import type { InviteUserInput, UpdateMemberInput } from './users.schemas';
+import type { CreateMemberInput, InviteUserInput, UpdateMemberInput } from './users.schemas';
 
 export interface Member {
   id: string;
@@ -46,6 +47,86 @@ export async function listMembers(restaurantId: string): Promise<Member[]> {
     [restaurantId],
   );
   return rows.map(toMember);
+}
+
+/**
+ * §2.b — Le gérant crée directement le compte d'un collègue.
+ *
+ * Le nouveau venu a exactement les mêmes droits, sauf celui d'être
+ * propriétaire : ce statut reste attaché au créateur de l'espace, seul
+ * compte impossible à désactiver.
+ */
+export async function createMember(
+  restaurantId: string,
+  input: CreateMemberInput,
+): Promise<Member> {
+  // L'adresse est unique sur toute la plateforme (contrainte `users.email`) :
+  // on le vérifie ici pour renvoyer un message clair plutôt qu'une erreur
+  // de contrainte, et sans révéler à quel restaurant appartient l'adresse.
+  const existing = await queryOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+    input.email,
+  ]);
+  if (existing) {
+    throw conflict('Cette adresse e-mail est déjà utilisée par un compte.');
+  }
+
+  const pending = await queryOne<{ id: string }>(
+    `SELECT id FROM user_invitations
+      WHERE restaurant_id = $1 AND email = $2
+        AND accepted_at IS NULL AND revoked_at IS NULL`,
+    [restaurantId, input.email],
+  );
+  // Une invitation en attente pour la même adresse n'a plus lieu d'être.
+  if (pending) {
+    await query('UPDATE user_invitations SET revoked_at = now() WHERE id = $1', [pending.id]);
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  const row = await queryOne<MemberRow>(
+    `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, email, full_name, phone, is_owner, is_active, last_login_at, created_at`,
+    [restaurantId, input.email, passwordHash, input.fullName, input.phone ?? null],
+  );
+  if (!row) throw new Error('Création du compte impossible.');
+
+  return toMember(row);
+}
+
+/**
+ * Retire l'accès d'un collègue. Le compte est supprimé s'il n'a rien
+ * saisi ; sinon il est désactivé, pour que les ventes et les dépenses
+ * gardent le nom de celui qui les a enregistrées.
+ */
+export async function removeMember(
+  restaurantId: string,
+  memberId: string,
+  actorId: string,
+): Promise<void> {
+  if (memberId === actorId) throw badRequest('Vous ne pouvez pas supprimer votre propre compte.');
+
+  const target = await queryOne<{ is_owner: boolean }>(
+    'SELECT is_owner FROM users WHERE id = $1 AND restaurant_id = $2',
+    [memberId, restaurantId],
+  );
+  if (!target) throw notFound('Utilisateur');
+  if (target.is_owner) throw badRequest('Le compte propriétaire ne peut pas être supprimé.');
+
+  await revokeAllSessions('user', memberId);
+
+  try {
+    const removed = await queryOne('DELETE FROM users WHERE id = $1 RETURNING id', [memberId]);
+    if (!removed) throw notFound('Utilisateur');
+  } catch (error) {
+    // Des écritures pointent sur ce compte : on le désactive pour ne pas
+    // effacer l'auteur d'une vente ou d'une dépense.
+    if ((error as { code?: string }).code === '23503') {
+      await query('UPDATE users SET is_active = false WHERE id = $1', [memberId]);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function updateMember(

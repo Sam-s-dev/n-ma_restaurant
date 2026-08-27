@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { invalidateCache } from '../cache';
 
 /** §8 — Ventes. */
 export type PaymentMethod = 'cash' | 'mobile_money' | 'card' | 'credit';
@@ -75,7 +76,12 @@ export const STATUS_LABELS: Record<SaleStatus, string> = {
 };
 
 export function createSale(payload: CreateSalePayload): Promise<Sale> {
-  return authed<Sale>('/api/sales', { method: 'POST', body: payload });
+  return authed<Sale>('/api/sales', { method: 'POST', body: payload }).then((sale) => {
+    // Une vente touche la caisse, les portions du menu et tous les chiffres
+    // du tableau de bord : les valeurs en cache ne valent plus rien.
+    invalidateCache('dashboard:', 'menu:');
+    return sale;
+  });
 }
 
 export function listSales(
@@ -113,5 +119,10 @@ export function getReceipt(id: string): Promise<Receipt> {
 }
 
 export function cancelSale(id: string, reason: string): Promise<Sale> {
-  return authed<Sale>(`/api/sales/${id}/cancel`, { method: 'POST', body: { reason } });
+  return authed<Sale>(`/api/sales/${id}/cancel`, { method: 'POST', body: { reason } }).then(
+    (sale) => {
+      invalidateCache('dashboard:', 'menu:');
+      return sale;
+    },
+  );
 }

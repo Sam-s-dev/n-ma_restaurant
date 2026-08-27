@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -102,6 +102,34 @@ export function LoginScreen({
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Le serveur est endormi après un quart d'heure sans trafic, et son
+   * redémarrage prend une vingtaine de secondes. Passé quatre secondes
+   * d'attente, on l'explique : sans cela le gérant croit l'application
+   * bloquée et appuie plusieurs fois, ce qui consomme ses tentatives.
+   */
+  const [waking, setWaking] = useState(false);
+  const wakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (wakeTimer.current) clearTimeout(wakeTimer.current);
+    },
+    [],
+  );
+
+  function startSubmitting() {
+    setSubmitting(true);
+    setWaking(false);
+    wakeTimer.current = setTimeout(() => setWaking(true), 4000);
+  }
+
+  function stopSubmitting() {
+    if (wakeTimer.current) clearTimeout(wakeTimer.current);
+    wakeTimer.current = null;
+    setSubmitting(false);
+    setWaking(false);
+  }
 
   async function submit() {
     setStatus(null);
@@ -117,7 +145,7 @@ export function LoginScreen({
     if (Object.keys(nextErrors).length > 0) return;
 
     const normalizedEmail = email.trim().toLowerCase();
-    setSubmitting(true);
+    startSubmitting();
     try {
       // Cas courant : un gérant de restaurant.
       const session = await login(normalizedEmail, password);
@@ -130,7 +158,7 @@ export function LoginScreen({
           title: 'Erreur',
           message: 'Une erreur inattendue est survenue.',
         });
-        setSubmitting(false);
+        stopSubmitting();
         return;
       }
 
@@ -160,7 +188,7 @@ export function LoginScreen({
 
       setStatus(statusFromError(error));
     } finally {
-      setSubmitting(false);
+      stopSubmitting();
     }
   }
 
@@ -226,9 +254,16 @@ export function LoginScreen({
           style={styles.submit}
         />
 
+        {waking && (
+          <Text style={styles.waking}>
+            Réveil du serveur en cours… la première connexion de la journée peut demander une
+            vingtaine de secondes.
+          </Text>
+        )}
+
         <View style={styles.separator}>
           <View style={styles.separatorLine} />
-          <Text style={styles.separatorText}>Nouveau sur N’ma ?</Text>
+          <Text style={styles.separatorText}>Nouveau sur N’ma Restaurant ?</Text>
           <View style={styles.separatorLine} />
         </View>
 
@@ -268,6 +303,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xxl,
   },
   submit: {
+    marginTop: spacing.md,
+  },
+  waking: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textTertiary,
+    textAlign: 'center',
     marginTop: spacing.md,
   },
   separator: {

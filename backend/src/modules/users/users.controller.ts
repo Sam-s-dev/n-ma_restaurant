@@ -3,13 +3,27 @@ import { z } from 'zod';
 import { parseOrThrow } from '../../core/validate';
 import { currentUser } from '../../middlewares/auth';
 import * as service from './users.service';
-import { inviteUserSchema, updateMemberSchema } from './users.schemas';
+import { createMemberSchema, inviteUserSchema, updateMemberSchema } from './users.schemas';
 
 const idParam = z.object({ id: z.string().uuid('Identifiant invalide.') });
 
 export async function listMembers(req: Request, res: Response) {
   const user = currentUser(req);
   res.json({ items: await service.listMembers(user.restaurantId) });
+}
+
+/** §2.b — Création directe du compte d'un collègue par le gérant. */
+export async function createMember(req: Request, res: Response) {
+  const user = currentUser(req);
+  const input = parseOrThrow(createMemberSchema, req.body, 'membre');
+  res.status(201).json(await service.createMember(user.restaurantId, input));
+}
+
+export async function removeMember(req: Request, res: Response) {
+  const user = currentUser(req);
+  const { id } = parseOrThrow(idParam, req.params, 'requête');
+  await service.removeMember(user.restaurantId, id, user.id);
+  res.status(204).send();
 }
 
 export async function updateMember(req: Request, res: Response) {

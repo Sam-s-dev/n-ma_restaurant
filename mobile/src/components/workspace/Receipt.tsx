@@ -1,4 +1,4 @@
-import { Image, Platform, Share, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { API_URL } from '../../api/client';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import type { Receipt as ReceiptData } from '../../api/workspace/sales';
@@ -133,60 +133,6 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       </Text>
     </View>
   );
-}
-
-/**
- * Partage du ticket en texte : ni impression ni PDF ici, mais un message
- * WhatsApp ou SMS que le client reçoit tout de suite — c'est ce qui se
- * pratique, et cela n'exige aucun matériel.
- */
-export async function shareReceipt(data: ReceiptData): Promise<void> {
-  const { restaurant, sale } = data;
-  const currency = {
-    symbol: restaurant.currencySymbol,
-    decimals: restaurant.currencyDecimals,
-  };
-  const money = (value: number) => formatMoney(value, currency);
-
-  const lines = (sale.items ?? [])
-    .map((item) => `  ${item.quantity} × ${item.dishName}  ${money(item.lineTotal)}`)
-    .join('\n');
-
-  const text = [
-    restaurant.name.toUpperCase(),
-    restaurant.address ?? '',
-    restaurant.phone ?? '',
-    '',
-    `Ticket ${sale.reference}`,
-    formatDateTime(sale.soldAt),
-    '',
-    lines,
-    '',
-    `TOTAL : ${money(sale.totalAmount)}`,
-    `Règlement : ${PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod}`,
-    sale.credit ? `Reste dû : ${money(sale.credit.amountLeft)}` : '',
-    '',
-    'Merci de votre visite.',
-  ]
-    .filter((part) => part !== '')
-    .join('\n');
-
-  // `Share` n'existe pas sur navigateur dans React Native Web : on retombe
-  // sur le presse-papiers du navigateur quand il est disponible.
-  if (Platform.OS === 'web') {
-    const navigatorRef = globalThis.navigator as
-      | { share?: (data: { text: string }) => Promise<void>; clipboard?: Clipboard }
-      | undefined;
-
-    if (navigatorRef?.share) {
-      await navigatorRef.share({ text });
-      return;
-    }
-    await navigatorRef?.clipboard?.writeText(text);
-    return;
-  }
-
-  await Share.share({ message: text });
 }
 
 function initialsOf(name: string): string {

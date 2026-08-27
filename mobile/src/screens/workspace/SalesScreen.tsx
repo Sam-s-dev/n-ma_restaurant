@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
@@ -8,11 +9,12 @@ import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
 import { Field } from '../../components/workspace/Field';
 import { EmptyState, ListRow, RowDivider } from '../../components/workspace/ListRow';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
-import { Receipt, shareReceipt } from '../../components/workspace/Receipt';
+import { Receipt } from '../../components/workspace/Receipt';
 import { Reveal } from '../../components/workspace/Motion';
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
 import { ApiError, mediaUrl } from '../../api/client';
+import { useResource } from '../../api/cache';
 import { createCustomer, listCustomers } from '../../api/workspace/customers';
 import type { Customer } from '../../api/workspace/customers';
 import { listCategories, listDishes } from '../../api/workspace/menu';
@@ -34,11 +36,15 @@ import type {
   SalesPage,
 } from '../../api/workspace/sales';
 import { SearchField } from '../../components/workspace/SearchField';
+import { printReceipt, shareReceiptPdf } from '../../utils/receiptPdf';
 import { formatDateTime, formatRelativeDay, todayISO } from '../../utils/date';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { radius, screenPadding, shadows, spacing } from '../../theme/layout';
 import { useWorkspace } from './WorkspaceContext';
+
+/** Espace entre deux cartes de plat, repris par le calcul de colonnes. */
+const GRID_GAP = 12;
 
 interface CartLine {
   dish: Dish;
@@ -94,32 +100,34 @@ export function SalesScreen() {
 function NewSale() {
   const { money, currency, refreshBalance, notify, navigate } = useWorkspace();
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [dishes, setDishes] = useState<Dish[]>([]);
   const [category, setCategory] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState<Sale | null>(null);
+  const [cardWidth, setCardWidth] = useState(0);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [nextCategories, nextDishes] = await Promise.all([listCategories(), listDishes()]);
-      setCategories(nextCategories);
-      setDishes(nextDishes);
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Chargement du menu impossible.');
-    } finally {
-      setLoading(false);
-    }
+  /**
+   * Deux colonnes sur un téléphone, davantage sur un écran large : on vise
+   * une carte d'environ 165 points, largeur en dessous de laquelle le nom
+   * d'un plat ne tient plus sur deux lignes.
+   */
+  const measureGrid = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    if (width <= 0) return;
+    const columns = Math.max(2, Math.floor(width / 175));
+    setCardWidth(Math.floor((width - GRID_GAP * (columns - 1)) / columns));
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Carte partagée avec l'écran Menu : une seule clé de cache pour les deux,
+  // ce qui rend le passage de l'un à l'autre instantané.
+  const menu = useResource<{ categories: Category[]; dishes: Dish[] }>('menu:list', async () => {
+    const [categories, dishes] = await Promise.all([listCategories(), listDishes()]);
+    return { categories, dishes };
+  });
+
+  const categories = menu.data?.categories ?? [];
+  const dishes = menu.data?.dishes ?? [];
 
   const visibleDishes = useMemo(
     () => (category === 'all' ? dishes : dishes.filter((dish) => dish.categoryId === category)),
@@ -152,8 +160,8 @@ function NewSale() {
     );
   }
 
-  if (loading) return <LoadingState label="Chargement du menu…" />;
-  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (menu.loading) return <LoadingState label="Chargement du menu…" />;
+  if (menu.error) return <ErrorState message={menu.error} onRetry={() => void menu.refresh()} />;
 
   if (dishes.length === 0) {
     return (
@@ -188,61 +196,86 @@ function NewSale() {
           />
         </View>
 
-        <View style={styles.dishGrid}>
+        {/*
+          Largeur de colonne calculée plutôt que laissée au `flex` : avec
+          `flexGrow`, la dernière carte d'une rangée incomplète s'étirait
+          sur toute la largeur restante et n'avait plus la taille de ses
+          voisines.
+        */}
+        <View style={styles.dishGrid} onLayout={measureGrid}>
           {visibleDishes.map((dish, position) => {
             const inCart = cart.find((line) => line.dish.id === dish.id)?.quantity ?? 0;
 
             return (
-              <Reveal key={dish.id} index={position} style={styles.dishSlot}>
-              <Pressable
-                onPress={() => dish.isAvailable && addToCart(dish)}
-                disabled={!dish.isAvailable}
-                accessibilityRole="button"
-                accessibilityLabel={`Ajouter ${dish.name}`}
-                style={({ pressed }) => [
-                  styles.dishCard,
-                  !dish.isAvailable && styles.dishCardOff,
-                  pressed && dish.isAvailable && styles.dishCardPressed,
-                ]}
+              <Reveal
+                key={dish.id}
+                index={position}
+                style={[styles.dishSlot, cardWidth ? { width: cardWidth } : null]}
               >
-                {dish.photoMediaId ? (
-                  <Image
-                    source={{ uri: mediaUrl(dish.photoMediaId) as string }}
-                    style={styles.dishImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={[styles.dishImage, styles.dishImagePlaceholder]}>
-                    <Icon name="menu-book" size={20} color={colors.textTertiary} strokeWidth={1.7} />
+                <Pressable
+                  onPress={() => dish.isAvailable && addToCart(dish)}
+                  disabled={!dish.isAvailable}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ajouter ${dish.name}`}
+                  style={({ pressed }) => [
+                    styles.dishCard,
+                    !dish.isAvailable && styles.dishCardOff,
+                    pressed && dish.isAvailable && styles.dishCardPressed,
+                  ]}
+                >
+                  {/*
+                    Cadre au rapport fixe : quelle que soit la photo envoyée
+                    — portrait, panoramique, carrée — elle est recadrée dans
+                    la même vignette, et toutes les cartes s'alignent.
+                  */}
+                  <View style={styles.dishImageFrame}>
+                    {dish.photoMediaId ? (
+                      <Image
+                        source={{ uri: mediaUrl(dish.photoMediaId) as string }}
+                        style={styles.dishImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Icon name="menu-book" size={22} color={colors.textTertiary} strokeWidth={1.7} />
+                    )}
+
+                    {inCart > 0 && (
+                      <View style={styles.dishCount}>
+                        <Text style={styles.dishCountText}>{inCart}</Text>
+                      </View>
+                    )}
                   </View>
-                )}
 
-                {inCart > 0 && (
-                  <View style={styles.dishCount}>
-                    <Text style={styles.dishCountText}>{inCart}</Text>
-                  </View>
-                )}
-
-                <Text style={styles.dishName} numberOfLines={2}>
-                  {dish.name}
-                </Text>
-                <Text style={styles.dishCategory} numberOfLines={1}>
-                  {dish.categoryName ?? 'Sans catégorie'}
-                </Text>
-                <Text style={styles.dishPrice} numberOfLines={1}>
-                  {money(dish.price)}
-                </Text>
-
-                {!dish.isAvailable ? (
-                  <Text style={styles.dishOff}>En rupture</Text>
-                ) : dish.availableQuantity !== null ? (
-                  <Text
-                    style={[styles.dishStock, dish.availableQuantity <= 3 && styles.dishStockLow]}
-                  >
-                    {dish.availableQuantity} portion(s)
+                  {/* Hauteurs réservées : deux lignes de nom, une de
+                      catégorie, une de pied — même si le texte est plus
+                      court, la carte garde la même hauteur. */}
+                  <Text style={styles.dishName} numberOfLines={2}>
+                    {dish.name}
                   </Text>
-                ) : null}
-              </Pressable>
+                  <Text style={styles.dishCategory} numberOfLines={1}>
+                    {dish.categoryName ?? 'Sans catégorie'}
+                  </Text>
+                  <Text style={styles.dishPrice} numberOfLines={1}>
+                    {money(dish.price)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.dishFooter,
+                      !dish.isAvailable && styles.dishFooterOff,
+                      dish.isAvailable &&
+                        dish.availableQuantity !== null &&
+                        dish.availableQuantity <= 3 &&
+                        styles.dishFooterLow,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {!dish.isAvailable
+                      ? 'En rupture'
+                      : dish.availableQuantity !== null
+                        ? `${dish.availableQuantity} portion(s)`
+                        : 'Toujours disponible'}
+                  </Text>
+                </Pressable>
               </Reveal>
             );
           })}
@@ -284,6 +317,9 @@ function NewSale() {
           setCart([]);
           setReceipt(sale);
           refreshBalance();
+          // Les portions vendues viennent d'être retirées : on recharge la
+          // carte pour que les compteurs affichés soient justes.
+          void menu.refresh();
           notify(`Vente ${sale.reference} enregistrée`);
         }}
       />
@@ -703,6 +739,20 @@ function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
       );
   }, [sale]);
 
+  /**
+   * L'impression et la génération du PDF passent par le système : sans
+   * imprimante configurée ou sans application capable d'ouvrir un PDF,
+   * l'appel échoue. On le dit, plutôt que de laisser le bouton sans effet.
+   */
+  async function run(action: () => Promise<void>) {
+    try {
+      setError(null);
+      await action();
+    } catch {
+      setError('Impression indisponible sur cet appareil. Réessayez ou partagez autrement.');
+    }
+  }
+
   return (
     <Sheet
       visible={Boolean(sale)}
@@ -713,11 +763,25 @@ function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
       actions={
         <>
           {data && (
-            <Button
-              label="Envoyer le ticket au client"
-              onPress={() => void shareReceipt(data)}
-              variant="secondary"
-            />
+            <View style={styles.receiptActions}>
+              <Pressable
+                style={styles.receiptAction}
+                onPress={() => void run(() => printReceipt(data))}
+                accessibilityRole="button"
+              >
+                <Icon name="receipt" size={16} color={colors.primary} strokeWidth={2.1} />
+                <Text style={styles.receiptActionText}>Imprimer</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.receiptAction}
+                onPress={() => void run(() => shareReceiptPdf(data))}
+                accessibilityRole="button"
+              >
+                <Icon name="send" size={16} color={colors.primary} strokeWidth={2.1} />
+                <Text style={styles.receiptActionText}>Envoyer le PDF</Text>
+              </Pressable>
+            </View>
           )}
           <Button label="Nouvelle vente" onPress={onClose} />
         </>
@@ -997,13 +1061,12 @@ const styles = StyleSheet.create({
   dishGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.md,
+    gap: GRID_GAP,
   },
   dishSlot: {
-    flexGrow: 1,
-    flexBasis: '46%',
-    minWidth: 150,
-    maxWidth: 220,
+    // La largeur est fixée à la mesure ; sans elle, rien ne s'affiche
+    // avant le premier calcul.
+    minWidth: 140,
   },
   dishCard: {
     backgroundColor: colors.surface,
@@ -1020,26 +1083,35 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.975 }],
     borderColor: colors.primary,
   },
-  dishImage: {
+  dishImageFrame: {
     width: '100%',
-    height: 84,
+    // Rapport 4:3 : le cadre suit la largeur de la carte, et la photo est
+    // recadrée dedans quelles que soient ses proportions d'origine.
+    aspectRatio: 4 / 3,
     borderRadius: radius.md,
     backgroundColor: colors.backgroundAlt,
     marginBottom: spacing.md,
-  },
-  dishImagePlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  dishStock: {
+  dishImage: {
+    width: '100%',
+    height: '100%',
+  },
+  dishFooter: {
     fontFamily: fontFamily.medium,
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 16,
+    height: 16,
     color: colors.textTertiary,
     marginTop: 2,
   },
-  dishStockLow: {
+  dishFooterLow: {
     color: colors.warning,
+  },
+  dishFooterOff: {
+    color: colors.danger,
   },
   dishCount: {
     position: 'absolute',
@@ -1059,16 +1131,19 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: colors.textOnPrimary,
   },
+  /* Hauteurs figées : deux lignes de nom réservées même pour un nom court,
+     sans quoi les cartes d'une même rangée ne s'alignent pas. */
   dishName: {
     ...typography.bodyStrong,
     fontSize: 14,
     lineHeight: 19,
-    paddingRight: spacing.xl,
+    height: 38,
   },
   dishCategory: {
     fontFamily: fontFamily.regular,
     fontSize: 11,
     lineHeight: 15,
+    height: 15,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -1076,15 +1151,9 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.bold,
     fontSize: 15,
     lineHeight: 21,
+    height: 21,
     color: colors.primary,
     marginTop: spacing.sm,
-  },
-  dishOff: {
-    fontFamily: fontFamily.medium,
-    fontSize: 11,
-    lineHeight: 15,
-    color: colors.danger,
-    marginTop: 2,
   },
   noDish: {
     ...typography.small,
@@ -1396,6 +1465,28 @@ const styles = StyleSheet.create({
     ...typography.bodyStrong,
     fontSize: 13,
     color: colors.success,
+  },
+  receiptActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  receiptAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 46,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  receiptActionText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.primary,
   },
   receiptLoading: {
     ...typography.small,

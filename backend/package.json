@@ -16,7 +16,8 @@
     "seed": "tsx src/db/seed.ts",
     "seed:prod": "node dist/db/seed.js",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke-test.ts"
+    "smoke": "tsx scripts/smoke-test.ts",
+    "integration": "tsx scripts/integration-check.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

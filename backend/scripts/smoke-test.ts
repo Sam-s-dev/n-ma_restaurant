@@ -716,37 +716,88 @@ async function main(): Promise<void> {
   );
 
   // ---------------------------------------------------------------------
-  section('16. Équipe et invitations (§2.b)');
-  const invite = await call('POST', '/api/users/invitations', {
-    token,
-    body: { email: `collegue.${stamp}@exemple.com` },
-  });
-  check('invitation créée', invite.status === 201, invite.body);
-  const inviteToken: string = invite.body?.token;
+  section('16. Équipe : création directe d’un compte (§2.b)');
+  const colleagueEmail = `collegue.${stamp}@exemple.com`;
+  const colleaguePassword = 'MotDePasse456!';
 
-  const accepted = await call('POST', '/api/auth/invitations/accept', {
+  const tooShort = await call('POST', '/api/users', {
+    token,
+    body: { fullName: 'Fatou Collègue', email: colleagueEmail, password: 'court' },
+  });
+  check('mot de passe trop court refusé (400)', tooShort.status === 400, tooShort.body);
+
+  const created = await call('POST', '/api/users', {
+    token,
     body: {
-      token: inviteToken,
       fullName: 'Fatou Collègue',
-      password: 'MotDePasse456!',
+      email: colleagueEmail,
+      password: colleaguePassword,
+      phone: '620 33 44 55',
     },
   });
-  check('invitation acceptée, session ouverte', accepted.status === 201, accepted.body);
-  check(
-    'le collègue est rattaché au même restaurant',
-    accepted.body?.profile?.restaurant?.id === restaurantId,
-    accepted.body?.profile?.restaurant,
-  );
+  check('compte du collègue créé (201)', created.status === 201, created.body);
+  check('il n’est pas propriétaire', created.body?.isOwner === false, created.body);
+  check('il est actif d’emblée', created.body?.isActive === true, created.body);
+
+  const duplicate = await call('POST', '/api/users', {
+    token,
+    body: { fullName: 'Doublon', email: colleagueEmail, password: colleaguePassword },
+  });
+  check('adresse déjà utilisée refusée (409)', duplicate.status === 409, duplicate.body);
 
   const members = await call('GET', '/api/users', { token });
   check('2 membres dans l’équipe', members.body?.items?.length === 2, members.body?.items);
 
-  const colleagueToken: string = accepted.body?.accessToken;
+  // Le collègue se connecte avec les identifiants que le gérant lui a donnés.
+  const colleagueLogin = await call('POST', '/api/auth/login', {
+    body: { email: colleagueEmail, password: colleaguePassword },
+  });
+  check('le collègue se connecte directement', colleagueLogin.status === 200, colleagueLogin.body);
+  check(
+    'il est rattaché au même restaurant',
+    colleagueLogin.body?.profile?.restaurant?.id === restaurantId,
+    colleagueLogin.body?.profile?.restaurant,
+  );
+
+  const colleagueToken: string = colleagueLogin.body?.accessToken;
   const colleagueBalance = await call('GET', '/api/cash/balance', { token: colleagueToken });
   check(
     'le collègue a les mêmes droits (accès caisse)',
     colleagueBalance.body?.balance === CAPITAL - 30000,
     colleagueBalance.body,
+  );
+
+  // Retrait de l'équipe : le compte n'a rien saisi, il est supprimé.
+  const spare = await call('POST', '/api/users', {
+    token,
+    body: {
+      fullName: 'Compte Éphémère',
+      email: `ephemere.${stamp}@exemple.com`,
+      password: colleaguePassword,
+    },
+  });
+  const removed = await call('DELETE', `/api/users/${spare.body?.id}`, { token });
+  check('retrait de l’équipe (204)', removed.status === 204, removed.body);
+
+  const afterRemoval = await call('GET', '/api/users', { token });
+  check(
+    'le compte retiré ne figure plus dans l’équipe',
+    afterRemoval.body?.items?.length === 2,
+    afterRemoval.body?.items?.length,
+  );
+
+  const removedLogin = await call('POST', '/api/auth/login', {
+    body: { email: `ephemere.${stamp}@exemple.com`, password: colleaguePassword },
+  });
+  check('il ne peut plus se connecter (401)', removedLogin.status === 401, removedLogin.status);
+
+  const selfRemoval = await call('DELETE', `/api/users/${created.body?.id}`, {
+    token: colleagueToken,
+  });
+  check(
+    'on ne peut pas supprimer son propre compte (400)',
+    selfRemoval.status === 400,
+    selfRemoval.body,
   );
 
   // ---------------------------------------------------------------------

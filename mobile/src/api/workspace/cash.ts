@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { invalidateCache } from '../cache';
 
 /** §7 — Caisse : solde et grand livre des mouvements. */
 export type CashDirection = 'in' | 'out';
@@ -74,7 +75,12 @@ export function adjustCash(payload: {
   amount: number;
   label: string;
 }): Promise<CashBalance> {
-  return authed<CashBalance>('/api/cash/adjustments', { method: 'POST', body: payload });
+  return authed<CashBalance>('/api/cash/adjustments', { method: 'POST', body: payload }).then(
+    (balance) => {
+      invalidateCache('dashboard:');
+      return balance;
+    },
+  );
 }
 
 /**
@@ -88,5 +94,10 @@ export function contributeCash(payload: {
   label?: string;
   paymentMethod?: string;
 }): Promise<CashBalance> {
-  return authed<CashBalance>('/api/cash/contributions', { method: 'POST', body: payload });
+  return authed<CashBalance>('/api/cash/contributions', { method: 'POST', body: payload }).then(
+    (balance) => {
+      invalidateCache('dashboard:');
+      return balance;
+    },
+  );
 }

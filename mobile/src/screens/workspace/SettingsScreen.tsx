@@ -12,15 +12,14 @@ import { Sheet } from '../../components/workspace/Sheet';
 import { ApiError, mediaUrl } from '../../api/client';
 import {
   changePassword,
+  createMember,
   fetchSettings,
-  inviteMember,
-  listInvitations,
   listMembers,
-  revokeInvitation,
+  removeMember,
   updateMember,
   updateSettings,
 } from '../../api/workspace/settings';
-import type { Invitation, Member, RestaurantSettings } from '../../api/workspace/settings';
+import type { Member, RestaurantSettings } from '../../api/workspace/settings';
 import { formatFullDate } from '../../utils/date';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
@@ -39,27 +38,25 @@ export function SettingsScreen() {
 
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [restaurantOpen, setRestaurantOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const [memberOpen, setMemberOpen] = useState(false);
+  const [memberActions, setMemberActions] = useState<Member | null>(null);
+  const [toRemove, setToRemove] = useState<Member | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextSettings, nextMembers, nextInvitations] = await Promise.all([
-        fetchSettings(),
-        listMembers(),
-        listInvitations().catch(() => [] as Invitation[]),
-      ]);
+      const [nextSettings, nextMembers] = await Promise.all([fetchSettings(), listMembers()]);
       setSettings(nextSettings);
       setMembers(nextMembers);
-      setInvitations(nextInvitations);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Chargement des paramètres impossible.');
     } finally {
@@ -81,13 +78,19 @@ export function SettingsScreen() {
     }
   }
 
-  async function cancelInvitation(invitation: Invitation) {
+  async function confirmRemove() {
+    if (!toRemove) return;
+    setRemoving(true);
+    setRemoveError(null);
     try {
-      await revokeInvitation(invitation.id);
-      notify('Invitation annulée');
+      await removeMember(toRemove.id);
+      setToRemove(null);
+      notify('Accès retiré');
       await load();
     } catch (cause) {
-      notify(cause instanceof ApiError ? cause.message : 'Annulation impossible.', 'danger');
+      setRemoveError(cause instanceof ApiError ? cause.message : 'Suppression impossible.');
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -176,10 +179,10 @@ export function SettingsScreen() {
             caption={`${members.length} personne(s) avec un accès`}
             action={
               <Pressable
-                onPress={() => setInviteOpen(true)}
+                onPress={() => setMemberOpen(true)}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Inviter un collègue"
+                accessibilityLabel="Ajouter un membre de l’équipe"
               >
                 <Icon name="plus" size={18} color={colors.primary} strokeWidth={2.4} />
               </Pressable>
@@ -207,41 +210,16 @@ export function SettingsScreen() {
                 onPress={
                   member.id === profile.user.id || member.isOwner
                     ? undefined
-                    : () => void toggleMember(member)
+                    : () => setMemberActions(member)
                 }
               />
             </View>
           ))}
 
-          {invitations.length > 0 && (
-            <>
-              <View style={styles.invitationsHeader}>
-                <Text style={styles.invitationsTitle}>Invitations en attente</Text>
-              </View>
-              {invitations.map((invitation, index) => (
-                <View key={invitation.id}>
-                  {index > 0 && <RowDivider />}
-                  <ListRow
-                    icon="send"
-                    iconColor={colors.iconAmber}
-                    iconBackground={colors.pastelAmber}
-                    title={invitation.email}
-                    subtitle={`Expire le ${formatFullDate(invitation.expiresAt.slice(0, 10))}`}
-                    badge={
-                      <Pressable
-                        onPress={() => void cancelInvitation(invitation)}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Annuler l’invitation de ${invitation.email}`}
-                      >
-                        <Icon name="close" size={15} color={colors.danger} strokeWidth={2.3} />
-                      </Pressable>
-                    }
-                  />
-                </View>
-              ))}
-            </>
-          )}
+          <Text style={styles.teamHint}>
+            Créez le compte d’un collègue et donnez-lui ses identifiants : il pourra se connecter
+            tout de suite, avec les mêmes droits que vous.
+          </Text>
         </Card>
 
         {/* --- Compte ---------------------------------------------------- */}
@@ -290,13 +268,61 @@ export function SettingsScreen() {
         }}
       />
 
-      <InviteSheet
-        visible={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        onDone={() => {
-          setInviteOpen(false);
+      <MemberSheet
+        visible={memberOpen}
+        onClose={() => setMemberOpen(false)}
+        onDone={(message) => {
+          setMemberOpen(false);
+          notify(message);
           void load();
         }}
+      />
+
+      <Sheet
+        visible={Boolean(memberActions)}
+        title={memberActions?.fullName ?? ''}
+        subtitle={memberActions?.email}
+        onClose={() => setMemberActions(null)}
+        actions={
+          <>
+            <Button
+              label={memberActions?.isActive ? 'Suspendre l’accès' : 'Rétablir l’accès'}
+              onPress={() => {
+                const target = memberActions;
+                setMemberActions(null);
+                if (target) void toggleMember(target);
+              }}
+              variant="secondary"
+            />
+            <Button
+              label="Retirer de l’équipe"
+              onPress={() => {
+                const target = memberActions;
+                setMemberActions(null);
+                setRemoveError(null);
+                setToRemove(target);
+              }}
+              variant="ghost"
+            />
+          </>
+        }
+      >
+        <Text style={styles.memberActionsText}>
+          {memberActions?.isActive
+            ? 'Suspendre coupe l’accès immédiatement, sans supprimer le compte : les ventes et dépenses qu’il a saisies gardent son nom.'
+            : 'Cette personne ne peut plus se connecter. Rétablir son accès la remet en service.'}
+        </Text>
+      </Sheet>
+
+      <ConfirmSheet
+        visible={Boolean(toRemove)}
+        title="Retirer de l’équipe"
+        message={`${toRemove?.fullName ?? ''} ne pourra plus se connecter. Si cette personne a déjà saisi des ventes ou des dépenses, son compte est désactivé plutôt que supprimé, pour que son nom reste sur ses écritures.`}
+        confirmLabel="Retirer"
+        loading={removing}
+        error={removeError}
+        onCancel={() => setToRemove(null)}
+        onConfirm={() => void confirmRemove()}
       />
 
       <ConfirmSheet
@@ -506,45 +532,70 @@ function PasswordSheet({ visible, onClose, onDone }: PasswordSheetProps) {
   );
 }
 
-interface InviteSheetProps {
+interface MemberSheetProps {
   visible: boolean;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (message: string) => void;
 }
 
 /**
- * §2.b — Le lien d'invitation n'est pas envoyé par e-mail : le jeton est
- * affiché une seule fois, à charge du gérant de le transmettre par WhatsApp
- * ou SMS. C'est délibéré — pas de service d'envoi à maintenir.
+ * §2.b — Création du compte d'un collègue.
+ *
+ * Le gérant saisit lui-même l'adresse et le mot de passe, puis les
+ * communique de vive voix. La version précédente passait par un code
+ * d'invitation à transmettre : elle supposait que le collègue ait un
+ * téléphone, sache ouvrir un lien et termine la démarche — trois occasions
+ * d'échouer pour un serveur qu'on inscrit en deux minutes derrière le
+ * comptoir.
  */
-function InviteSheet({ visible, onClose, onDone }: InviteSheetProps) {
+function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
-  const [emailError, setEmailError] = useState<string | undefined>();
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [errors, setErrors] = useState<{
+    fullName?: string;
+    email?: string;
+    password?: string;
+    confirm?: string;
+  }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [created, setCreated] = useState<Invitation | null>(null);
 
   useEffect(() => {
     if (!visible) return;
+    setFullName('');
     setEmail('');
-    setEmailError(undefined);
+    setPhone('');
+    setPassword('');
+    setConfirm('');
+    setErrors({});
     setError(null);
-    setCreated(null);
   }, [visible]);
 
   async function submit() {
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
-      setEmailError('Adresse e-mail invalide.');
-      return;
-    }
-    setEmailError(undefined);
+    const next: typeof errors = {};
+    if (fullName.trim().length < 2) next.fullName = 'Indiquez le nom complet.';
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) next.email = 'Adresse e-mail invalide.';
+    if (password.length < 8) next.password = 'Au moins 8 caractères.';
+    if (password !== confirm) next.confirm = 'Les deux saisies ne correspondent pas.';
+
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+
     setSaving(true);
     setError(null);
-
     try {
-      setCreated(await inviteMember(email.trim().toLowerCase()));
+      await createMember({
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        phone: phone.trim() === '' ? null : phone.trim(),
+      });
+      onDone(`Compte créé pour ${fullName.trim()}`);
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Invitation impossible.');
+      setError(cause instanceof ApiError ? cause.message : 'Création impossible.');
     } finally {
       setSaving(false);
     }
@@ -553,50 +604,70 @@ function InviteSheet({ visible, onClose, onDone }: InviteSheetProps) {
   return (
     <Sheet
       visible={visible}
-      title="Inviter un collègue"
+      title="Nouveau membre de l’équipe"
       subtitle="Il aura exactement les mêmes droits que vous"
       error={error}
-      onClose={() => {
-        if (created) onDone();
-        else onClose();
-      }}
-      actions={
-        created ? (
-          <Button label="Terminé" onPress={onDone} />
-        ) : (
-          <Button label="Créer l’invitation" onPress={submit} loading={saving} />
-        )
-      }
+      onClose={onClose}
+      actions={<Button label="Créer le compte" onPress={submit} loading={saving} />}
     >
-      {created ? (
-        <View>
-          <Text style={styles.inviteDone}>
-            Invitation créée pour {created.email}. Transmettez-lui ce code — il ne sera plus
-            affiché ensuite.
-          </Text>
-          <View style={styles.tokenBox}>
-            <Text style={styles.tokenText} selectable>
-              {created.token}
-            </Text>
-          </View>
-          <Text style={styles.inviteHint}>
-            Valable jusqu’au {formatFullDate(created.expiresAt.slice(0, 10))}.
-          </Text>
-        </View>
-      ) : (
-        <Field
-          label="Adresse e-mail"
-          value={email}
-          onChangeText={(value) => {
-            setEmail(value);
-            if (emailError) setEmailError(undefined);
-          }}
-          placeholder="collegue@exemple.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          error={emailError}
-        />
-      )}
+      <Field
+        label="Nom complet"
+        value={fullName}
+        onChangeText={(value) => {
+          setFullName(value);
+          if (errors.fullName) setErrors((prev) => ({ ...prev, fullName: undefined }));
+        }}
+        placeholder="Fatoumata Camara"
+        error={errors.fullName}
+      />
+
+      <Field
+        label="Adresse e-mail"
+        value={email}
+        onChangeText={(value) => {
+          setEmail(value);
+          if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+        }}
+        placeholder="fatoumata@exemple.com"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        error={errors.email}
+        hint="C’est l’identifiant avec lequel elle se connectera."
+      />
+
+      <Field
+        label="Téléphone (facultatif)"
+        value={phone}
+        onChangeText={setPhone}
+        placeholder="620 00 00 00"
+        keyboardType="phone-pad"
+      />
+
+      <Field
+        label="Mot de passe"
+        value={password}
+        onChangeText={(value) => {
+          setPassword(value);
+          if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+        }}
+        secureTextEntry
+        autoCapitalize="none"
+        error={errors.password}
+        hint="Au moins 8 caractères. Communiquez-le-lui directement."
+      />
+
+      <Field
+        label="Confirmer le mot de passe"
+        value={confirm}
+        onChangeText={(value) => {
+          setConfirm(value);
+          if (errors.confirm) setErrors((prev) => ({ ...prev, confirm: undefined }));
+        }}
+        secureTextEntry
+        autoCapitalize="none"
+        error={errors.confirm}
+      />
     </Sheet>
   );
 }
@@ -690,15 +761,19 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     color: colors.primary,
   },
-  invitationsHeader: {
+  teamHint: {
+    ...typography.small,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textTertiary,
     marginTop: spacing.lg,
-    marginBottom: spacing.xs,
     paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  invitationsTitle: {
-    ...typography.caption,
+  memberActionsText: {
+    ...typography.small,
+    color: colors.textSecondary,
   },
   version: {
     ...typography.small,
@@ -707,28 +782,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.lg,
   },
-  inviteDone: {
-    ...typography.small,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-  },
-  tokenBox: {
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  tokenText: {
-    fontFamily: fontFamily.medium,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.textPrimary,
-  },
-  inviteHint: {
-    ...typography.small,
-    fontSize: 11,
-    color: colors.textTertiary,
-    marginTop: spacing.sm,
-  },
+
 });
