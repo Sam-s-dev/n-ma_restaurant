@@ -1192,7 +1192,10 @@ async function main(): Promise<void> {
   });
   await call('PATCH', `/api/stock/${stockItemId}`, { token, body: { alertThreshold: 0 } });
 
-  const since = new Date().toISOString();
+  // Repère pris sur la dernière notification reçue, comme le fait l'application :
+  // elle ne doit pas revenir (date en millisecondes contre microsecondes en base).
+  const latestInbox = await call('GET', '/api/notifications?limit=1', { token: storekeeper.token });
+  const since: string = latestInbox.body?.items?.[0]?.createdAt ?? new Date().toISOString();
   const nothingNew = await call(
     'GET',
     `/api/notifications?since=${encodeURIComponent(since)}`,

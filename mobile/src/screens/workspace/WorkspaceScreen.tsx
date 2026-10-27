@@ -167,6 +167,7 @@ export function WorkspaceScreen({
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const latestSeen = useRef<string | null>(null);
+  const seenIds = useRef(new Set<string>());
 
   /*
    * Interrogation toutes les dix secondes tant que l'espace est ouvert. Les
@@ -185,16 +186,21 @@ export function WorkspaceScreen({
         if (cancelled) return;
         setUnreadCount(page.unreadCount);
 
+        // Une notification déjà vue ne s'annonce jamais deux fois, quoi que
+        // renvoie le serveur.
+        const fresh = page.items.filter((item) => !seenIds.current.has(item.id));
+        fresh.forEach((item) => seenIds.current.add(item.id));
         const newest = page.items[0];
-        if (!newest) return;
-        latestSeen.current = newest.createdAt;
+        if (newest) latestSeen.current = newest.createdAt;
+        if (fresh.length === 0) return;
+
         setNotifications((current) =>
-          initial ? page.items : [...page.items, ...current].slice(0, 100),
+          initial ? fresh : [...fresh, ...current].slice(0, 100),
         );
 
         if (!initial) {
           playNotificationSound();
-          notify(page.items.length > 1 ? `${page.items.length} nouvelles notifications` : newest.title);
+          notify(fresh.length > 1 ? `${fresh.length} nouvelles notifications` : fresh[0]!.title);
           // Un achat approuvé, une vente annulée : le solde a pu bouger.
           refreshBalance();
         }

@@ -117,8 +117,12 @@ export async function listNotifications(
   const params: unknown[] = [userId];
   let where = 'WHERE user_id = $1';
   if (options.since) {
+    // PostgreSQL date à la microseconde, l'application renvoie la date à la
+    // milliseconde : sans l'arrondi, la dernière notification (12:00:00,123456)
+    // paraissait toujours postérieure à « since » (12:00:00,123) et revenait,
+    // avec son signal sonore, à chaque interrogation.
     params.push(options.since);
-    where += ` AND created_at > $${params.length}`;
+    where += ` AND date_trunc('milliseconds', created_at) > $${params.length}`;
   }
   params.push(options.limit);
 
