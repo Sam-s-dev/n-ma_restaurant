@@ -158,13 +158,19 @@ identiques que l'e-mail existe ou non.
 
 ## Déploiement sur Render
 
-Le dépôt contient un Blueprint prêt à l'emploi.
+Le dépôt contient un Blueprint prêt à l'emploi. La base PostgreSQL est
+hébergée chez **Neon** : la base gratuite de Render est supprimée au bout de
+30 jours, celle de Neon n'expire pas.
 
-1. Sur Render : **New → Blueprint**, sélectionner le dépôt. `render.yaml` crée
-   la base PostgreSQL et le service API, et génère `JWT_SECRET` automatiquement.
-2. Renseigner `SEED_SUPERADMIN_EMAIL` et `SEED_SUPERADMIN_PASSWORD` dans les
-   variables d'environnement du service, puis **Apply**.
-3. Une fois l'application mobile publiée, remplacer `CORS_ORIGINS=*` par les
+1. Sur Neon : créer un projet (Postgres 17, région **AWS Europe Central 1 —
+   Frankfurt**, la même que l'API) et copier l'adresse de connexion
+   **directe** — celle qui ne contient pas `-pooler`.
+2. Sur Render : **New → Blueprint**, sélectionner le dépôt. `render.yaml` crée
+   le service API et la version web, et génère `JWT_SECRET` automatiquement.
+3. Renseigner `DATABASE_URL` (l'adresse Neon), `SEED_SUPERADMIN_EMAIL` et
+   `SEED_SUPERADMIN_PASSWORD` dans les variables d'environnement du service,
+   puis **Apply**.
+4. Une fois l'application mobile publiée, remplacer `CORS_ORIGINS=*` par les
    origines réelles.
 
 Aucune commande manuelle n'est nécessaire. Au démarrage, le conteneur :
@@ -184,9 +190,9 @@ curl https://<votre-service>.onrender.com/health
 ```
 
 > Le plan gratuit met le service en veille après inactivité : la première
-> requête après une pause peut prendre une trentaine de secondes. Vérifiez
-> aussi la durée de validité de la base PostgreSQL gratuite — Render la
-> supprime au bout d'une période limitée.
+> requête après une pause peut prendre une trentaine de secondes. Neon met
+> aussi sa base en veille : la toute première requête peut prendre une
+> seconde de plus.
 
 ---
 

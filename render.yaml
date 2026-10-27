@@ -1,21 +1,22 @@
 # =============================================================
 # Déploiement sur Render (Blueprint)
-# Render lit ce fichier et crée la base PostgreSQL + le service API.
+# Render lit ce fichier et crée le service API et la version web.
 #
-#   1. Render → New → Blueprint → choisir le dépôt GitHub
-#   2. Renseigner SEED_SUPERADMIN_EMAIL et SEED_SUPERADMIN_PASSWORD
-#   3. Apply — c'est tout.
+# La base PostgreSQL est hébergée chez Neon, pas chez Render : la base
+# gratuite de Render est supprimée au bout de 30 jours, celle de Neon
+# n'expire pas.
+#
+#   1. Neon → créer un projet (Postgres 17, région Frankfurt) et copier
+#      l'adresse de connexion directe (sans « -pooler »)
+#   2. Render → New → Blueprint → choisir le dépôt GitHub
+#   3. Renseigner DATABASE_URL, SEED_SUPERADMIN_EMAIL et
+#      SEED_SUPERADMIN_PASSWORD
+#   4. Apply — c'est tout.
 #
 # Au démarrage, le conteneur applique lui-même les migrations puis crée le
 # compte Super Admin. Aucune commande manuelle n'est nécessaire, ce qui
 # permet de déployer sur le plan gratuit (qui n'offre pas d'accès shell).
 # =============================================================
-
-databases:
-  - name: restaurant-db
-    databaseName: restaurant
-    user: restaurant
-    plan: free
 
 services:
   # ------------------------------------------------------------------
@@ -55,12 +56,12 @@ services:
       - key: NODE_ENV
         value: production
 
+      # Adresse Neon, saisie dans le tableau de bord : elle contient le mot
+      # de passe de la base et ne doit jamais figurer dans le dépôt.
       - key: DATABASE_URL
-        fromDatabase:
-          name: restaurant-db
-          property: connectionString
+        sync: false
 
-      # Base managée Render : TLS obligatoire.
+      # Neon exige une connexion chiffrée.
       - key: DATABASE_SSL
         value: require
 
