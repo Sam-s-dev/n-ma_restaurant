@@ -33,7 +33,7 @@ const TICKET_HEIGHT_PT = 800;
  * sans logo. En cas d'échec, on renvoie `null` et l'en-tête retombe sur
  * les initiales du restaurant.
  */
-async function embedLogo(logoUrl: string | null): Promise<string | null> {
+export async function embedLogo(logoUrl: string | null): Promise<string | null> {
   if (!logoUrl) return null;
 
   try {
@@ -55,7 +55,7 @@ async function embedLogo(logoUrl: string | null): Promise<string | null> {
   }
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -259,6 +259,34 @@ export async function shareReceiptPdf(data: Receipt): Promise<void> {
  * les bloqueurs de fenêtres sur certains navigateurs, même déclenché par un
  * clic ; un iframe passe toujours.
  */
+/**
+ * Imprime ou partage un document HTML quelconque (ticket Z, rapport du
+ * mois) : boîte d'impression sur navigateur, PDF à partager sur téléphone.
+ * `ticket` règle la page sur la largeur d'une imprimante à tickets ; sinon
+ * le document sort en A4.
+ */
+export async function printDocument(
+  html: string,
+  options: { title: string; ticket?: boolean },
+): Promise<void> {
+  if (Platform.OS === 'web') {
+    printHtmlInFrame(html);
+    return;
+  }
+
+  const size = options.ticket ? { width: TICKET_WIDTH_PT, height: TICKET_HEIGHT_PT } : {};
+  const { uri } = await Print.printToFileAsync({ html, ...size });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, {
+      mimeType: 'application/pdf',
+      dialogTitle: options.title,
+      UTI: 'com.adobe.pdf',
+    });
+    return;
+  }
+  await Print.printAsync({ uri });
+}
+
 function printHtmlInFrame(html: string): void {
   const doc = globalThis.document;
   if (!doc) return;

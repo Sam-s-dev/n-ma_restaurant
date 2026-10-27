@@ -36,6 +36,8 @@ import type {
   SalesPage,
 } from '../../api/workspace/sales';
 import { SearchField } from '../../components/workspace/SearchField';
+import { CashSessionPanel } from '../../components/workspace/CashSessionPanel';
+import type { CashSession } from '../../api/workspace/sessions';
 import { printReceipt, shareReceiptPdf } from '../../utils/receiptPdf';
 import { formatDateTime, formatRelativeDay, todayISO } from '../../utils/date';
 import { colors } from '../../theme/colors';
@@ -73,11 +75,19 @@ const HISTORY_FILTERS = [
  * naviguer entre deux écrans distincts pendant le service.
  */
 export function SalesScreen() {
+  const { can } = useWorkspace();
   const [view, setView] = useState<'new' | 'history'>('new');
+  // `undefined` tant que l'état de la caisse n'est pas connu.
+  const [session, setSession] = useState<CashSession | null | undefined>(undefined);
+  const onSessionChange = useCallback((next: CashSession | null) => setSession(next), []);
+
+  // Le caissier n'encaisse que dans une caisse ouverte ; le gérant peut dépanner.
+  const blocked = session === null && !can('cash.manage') && can('cash.session');
 
   return (
     <View style={styles.screen}>
       <View style={styles.switcher}>
+        <CashSessionPanel onSessionChange={onSessionChange} />
         <Segmented
           options={[
             { value: 'new', label: 'Nouvelle vente' },
@@ -88,7 +98,17 @@ export function SalesScreen() {
         />
       </View>
 
-      {view === 'new' ? <NewSale /> : <SalesHistory />}
+      {view === 'history' ? (
+        <SalesHistory />
+      ) : blocked ? (
+        <EmptyState
+          icon="lock"
+          title="La caisse est fermée"
+          message="Ouvrez-la en comptant le fond de caisse, juste au-dessus : vous pourrez ensuite encaisser."
+        />
+      ) : (
+        <NewSale />
+      )}
     </View>
   );
 }

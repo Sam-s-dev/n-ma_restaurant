@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { parseOrThrow } from '../../core/validate';
 import { currentUser } from '../../middlewares/auth';
+import { requireOpenSessionUnlessManager } from '../sessions/sessions.guard';
 import * as service from './credits.service';
 import { listCreditsSchema, repayCreditSchema } from './credits.schemas';
 
@@ -23,6 +24,7 @@ export async function repayCredit(req: Request, res: Response) {
   const user = currentUser(req);
   const { id } = parseOrThrow(idParam, req.params, 'requête');
   const input = parseOrThrow(repayCreditSchema, req.body, 'remboursement');
+  await requireOpenSessionUnlessManager(req, user.restaurantId);
   res.status(201).json(await service.repayCredit(user.restaurantId, id, user.id, input));
 }
 

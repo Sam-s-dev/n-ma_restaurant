@@ -13,6 +13,8 @@ import { notificationsRouter } from '../modules/notifications/notifications.rout
 import { purchasesRouter } from '../modules/purchases/purchases.routes';
 import { restaurantRouter } from '../modules/restaurant/restaurant.routes';
 import { salesRouter } from '../modules/sales/sales.routes';
+import { sessionsRouter } from '../modules/sessions/sessions.routes';
+import { reportsRouter } from '../modules/reports/reports.routes';
 import { staffRouter } from '../modules/staff/staff.routes';
 import { stockRouter } from '../modules/stock/stock.routes';
 import { superAdminRouter } from '../modules/superadmin/superadmin.routes';
@@ -36,6 +38,7 @@ restaurantSpace.use('/users', usersRouter);           // §2.b Équipe
 restaurantSpace.use('/staff', staffRouter);           // §4  Personnel
 restaurantSpace.use('/menu', menuRouter);             // §5  Menu
 restaurantSpace.use('/stock', stockRouter);           // §6  Stock
+restaurantSpace.use('/cash/sessions', sessionsRouter); // §7 Ouverture / clôture
 restaurantSpace.use('/cash', cashRouter);             // §7  Caisse
 restaurantSpace.use('/sales', salesRouter);           // §8  Ventes
 restaurantSpace.use('/customers', customersRouter);   // §8  Clients
@@ -45,5 +48,6 @@ restaurantSpace.use('/dashboard', dashboardRouter);   // §10 Synthèse
 restaurantSpace.use('/audit', auditRouter);           // Journal d'activité
 restaurantSpace.use('/notifications', notificationsRouter);
 restaurantSpace.use('/purchases', purchasesRouter);   // Demandes d'achat
+restaurantSpace.use('/reports', reportsRouter);       // Rapports et exports
 
 apiRouter.use('/', restaurantSpace);

@@ -28,6 +28,8 @@ export type Permission =
   | 'purchases.approve'
   | 'cash.balance'
   | 'cash.view'
+  | 'cash.session'
+  | 'reports.export'
   | 'cash.manage'
   | 'dashboard.view'
   | 'staff.manage'

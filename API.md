@@ -77,7 +77,9 @@ refusé, mais c'est le serveur qui contrôle : toute action interdite répond `4
 
 | | Gérant | Caissier | Magasinier |
 |---|:-:|:-:|:-:|
-| Encaisser, imprimer un ticket | ✅ | ✅ (ses propres ventes seulement) | — |
+| Encaisser, imprimer un ticket | ✅ | ✅ (ses propres ventes, caisse ouverte) | — |
+| Ouvrir et clôturer la caisse (comptage à l'aveugle) | ✅ | ✅ | — |
+| Historique des clôtures, correction d'écart, rapports et exports | ✅ | — | — |
 | Annuler une vente, prix libre, vente antidatée | ✅ | — | — |
 | Clients (sauf suppression), créances, remboursements | ✅ | ✅ | — |
 | Consulter le menu, marquer un plat disponible ou épuisé | ✅ | ✅ | — |
@@ -239,6 +241,38 @@ automatiquement à l'inscription.
 | `GET` | `/api/cash/movements` | Historique (`?direction=&category=&from=&to=&page=`) |
 | `GET` | `/api/cash/breakdown?from=&to=` | Répartition des encaissements par mode de paiement |
 | `POST` | `/api/cash/adjustments` | Correction manuelle (fonds de caisse, erreur) |
+
+### Ouverture et clôture de caisse
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/cash/sessions/current` | Caisse ouverte, ou `null` |
+| `POST` | `/api/cash/sessions/open` | Ouvrir (`openingFloat`, `breakdown?` : `{ "20000": 3 }`) |
+| `POST` | `/api/cash/sessions/close` | Clôturer (`countedCash`, `breakdown?`, `countedMobileMoney?`, `note?`) |
+| `GET` | `/api/cash/sessions` | Historique des clôtures (gérant) |
+| `GET` | `/api/cash/sessions/:id` | Détail, avec le ticket Z (`summary`) |
+| `POST` | `/api/cash/sessions/:id/correct` | Aligner le solde sur le compté (une seule fois) |
+
+- Une seule caisse ouverte à la fois. Chaque mouvement écrit pendant qu'elle
+  est ouverte lui est rattaché (`cash_movements.session_id`).
+- **Attendu** = fond de caisse + mouvements de la session, par mode de paiement
+  (un mouvement sans mode compte en espèces).
+- **Comptage à l'aveugle** : sans le droit `cash.view`, la réponse ne contient
+  ni attendu, ni écart, ni résumé. Un comptage faux sans `note` est refusé
+  (`422`) sans indiquer l'écart.
+- Le caissier ne peut ni vendre ni encaisser un remboursement tant que la
+  caisse est fermée (`409`, `details.reason = "cash_session_closed"`) ; le
+  gérant le peut.
+- La correction d'un écart passe une écriture `adjustment` hors session.
+
+## Rapports et exports (gérant)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/reports/summary?from=&to=` | Synthèse de la période (CA, dépenses, résultat, créances, plats vedettes, écarts) |
+| `GET` | `/api/reports/export.xlsx?from=&to=` | Classeur Excel : Synthèse, Ventes, Dépenses, Caisse, Créances, Salaires, Clôtures |
+
+Période d'un an au plus. Chaque export est inscrit au journal (`report.exported`).
 
 ---
 

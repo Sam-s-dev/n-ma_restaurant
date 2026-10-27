@@ -16,6 +16,7 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
   credits: ['credits.view'],
   customers: ['customers.manage'],
   audit: ['audit.view'],
+  reports: ['reports.export'],
   // Le compte personnel (mot de passe, déconnexion) est ouvert à tous.
   settings: null,
   notifications: null,

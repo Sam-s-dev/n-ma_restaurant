@@ -43,7 +43,9 @@ export const PERMISSIONS = [
   'cash.balance', // le solde seul, pour savoir ce qu'on peut demander
   'cash.view', // solde, mouvements et répartition
   'cash.manage',
+  'cash.session', // ouvrir et clôturer la caisse (comptage à l'aveugle)
   'dashboard.view',
+  'reports.export',
   // Administration
   'staff.manage',
   'team.manage',
@@ -60,6 +62,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // les chiffres du restaurant, seulement ses propres ventes.
   cashier: new Set<Permission>([
     'sales.create',
+    'cash.session',
     'customers.manage',
     'credits.view',
     'credits.repay',

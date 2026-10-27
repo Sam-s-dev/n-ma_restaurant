@@ -4,6 +4,7 @@ import { forbidden } from '../../core/errors';
 import { dateRangeSchema } from '../../core/pagination';
 import { parseOrThrow } from '../../core/validate';
 import { can, currentUser } from '../../middlewares/auth';
+import { requireOpenSessionUnlessManager } from '../sessions/sessions.guard';
 import * as service from './sales.service';
 import { cancelSaleSchema, createSaleSchema, listSalesSchema } from './sales.schemas';
 
@@ -19,6 +20,7 @@ export async function createSale(req: Request, res: Response) {
   if ((overridesPrice || input.soldAt) && !can(req, 'sales.discount')) {
     throw forbidden('Seul le gérant peut modifier un prix ou antidater une vente.');
   }
+  await requireOpenSessionUnlessManager(req, user.restaurantId);
 
   res.status(201).json(await service.createSale(user.restaurantId, user.id, input));
 }

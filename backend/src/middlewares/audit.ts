@@ -21,7 +21,8 @@ export function audited(action: string): RequestHandler {
     // Capturés maintenant : après le routage, Express peut avoir remis
     // `req.params` à zéro.
     const entityParam = typeof req.params.id === 'string' ? req.params.id : null;
-    const body: unknown = req.body;
+    // Une lecture (export) n'a pas de corps : ses paramètres disent ce qui a été pris.
+    const body: unknown = req.method === 'GET' ? { ...req.query } : req.body;
 
     let responseBody: unknown;
     const json = res.json.bind(res);

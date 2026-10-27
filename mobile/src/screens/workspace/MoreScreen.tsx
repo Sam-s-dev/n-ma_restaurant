@@ -79,6 +79,14 @@ const MODULES: ModuleTile[] = [
     caption: () => 'Demandes du magasinier',
   },
   {
+    route: 'reports',
+    label: 'Rapports',
+    icon: 'bar-chart',
+    background: colors.pastelBlue,
+    color: colors.iconBlue,
+    caption: () => 'Excel pour le comptable, PDF du mois',
+  },
+  {
     route: 'audit',
     label: 'Journal',
     icon: 'clock',

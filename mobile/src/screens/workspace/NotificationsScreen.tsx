@@ -30,6 +30,10 @@ function styleOf(kind: string): KindStyle {
     case 'attendance':
     case 'employee':
       return { icon: 'users', color: colors.iconBlue, background: colors.pastelBlue };
+    case 'cash':
+      return kind.endsWith('with_difference')
+        ? { icon: 'wallet', color: colors.iconRed, background: colors.pastelRed }
+        : { icon: 'wallet', color: colors.iconGreen, background: colors.pastelGreen };
     case 'member':
       return { icon: 'user', color: colors.iconPurple, background: colors.pastelPurple };
     default:

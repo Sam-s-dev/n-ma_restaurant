@@ -41,6 +41,7 @@ import { SettingsScreen } from './SettingsScreen';
 import { AuditScreen } from './AuditScreen';
 import { PurchasesScreen } from './PurchasesScreen';
 import { NotificationsScreen } from './NotificationsScreen';
+import { ReportsScreen } from './ReportsScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 
 interface WorkspaceScreenProps {
@@ -64,6 +65,7 @@ const TITLES: Record<WorkspaceRoute, string> = {
   audit: 'Journal d’activité',
   purchases: 'Demandes d’achat',
   notifications: 'Notifications',
+  reports: 'Rapports et exports',
 };
 
 /** Interrogation des notifications : assez vite pour ressembler à une messagerie. */
@@ -83,6 +85,7 @@ const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>
   audit: { label: 'Journal', icon: 'clock' },
   purchases: { label: 'Achats', icon: 'cart' },
   notifications: { label: 'Alertes', icon: 'bell' },
+  reports: { label: 'Rapports', icon: 'bar-chart' },
   more: { label: 'Plus', icon: 'grid' },
 };
 
@@ -408,6 +411,8 @@ function renderRoute(route: WorkspaceRoute) {
       return <PurchasesScreen />;
     case 'notifications':
       return <NotificationsScreen />;
+    case 'reports':
+      return <ReportsScreen />;
     default:
       return null;
   }

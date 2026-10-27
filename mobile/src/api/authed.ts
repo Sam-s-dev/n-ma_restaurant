@@ -1,4 +1,4 @@
-import { ApiError, request } from './client';
+import { API_URL, ApiError, request } from './client';
 import { saveTokens } from './session';
 
 /**
@@ -61,6 +61,30 @@ export async function authed<T>(path: string, options: AuthedOptions = {}): Prom
 
     return request<T>(path, { ...options, token: renewed.accessToken });
   }
+}
+
+/**
+ * Téléchargement d'un fichier (export Excel) avec la session courante.
+ * Même renouvellement du jeton qu'`authed`, mais la réponse est un binaire,
+ * pas du JSON.
+ */
+export async function authedBlob(path: string): Promise<Blob> {
+  if (!tokens) throw new ApiError(401, 'UNAUTHORIZED', 'Session expirée, reconnectez-vous.');
+
+  const fetchWith = (accessToken: string) =>
+    fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+  let response = await fetchWith(tokens.accessToken);
+  if (response.status === 401) response = await fetchWith((await renew()).accessToken);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw new ApiError(
+      response.status,
+      'INTERNAL',
+      body?.error?.message ?? 'Téléchargement impossible. Réessayez.',
+    );
+  }
+  return response.blob();
 }
 
 /**

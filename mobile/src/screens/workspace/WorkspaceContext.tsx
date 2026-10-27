@@ -19,7 +19,8 @@ export type WorkspaceRoute =
   | 'settings'
   | 'audit'
   | 'purchases'
-  | 'notifications';
+  | 'notifications'
+  | 'reports';
 
 export interface WorkspaceContextValue {
   profile: Profile;

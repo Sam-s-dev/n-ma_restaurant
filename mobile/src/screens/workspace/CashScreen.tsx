@@ -10,6 +10,8 @@ import { EmptyState, ListRow, RowDivider, SectionHeader } from '../../components
 import { Pulse, Reveal } from '../../components/workspace/Motion';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { Sheet } from '../../components/workspace/Sheet';
+import { CashSessionPanel } from '../../components/workspace/CashSessionPanel';
+import { SessionsHistory } from '../../components/workspace/SessionsHistory';
 import { ApiError } from '../../api/client';
 import {
   CATEGORY_LABELS,
@@ -60,6 +62,8 @@ export function CashScreen() {
   const [error, setError] = useState<string | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [capitalOpen, setCapitalOpen] = useState(false);
+  /** Incrémenté à chaque clôture, pour recharger l'historique des clôtures. */
+  const [closings, setClosings] = useState(0);
 
   const load = useCallback(async () => {
     setError(null);
@@ -143,6 +147,14 @@ export function CashScreen() {
         </LinearGradient>
         </Reveal>
 
+        {/* Ouverture et clôture de la journée, avec comptage du tiroir. */}
+        <CashSessionPanel
+          onClosed={() => {
+            setClosings((count) => count + 1);
+            void load();
+          }}
+        />
+
         {/* §7 — Une caisse vide ne peut rien payer : l'apport est la porte
             d'entrée de l'argent du gérant, et il est mis en avant tant que
             le solde ne couvre rien. */}
@@ -173,6 +185,8 @@ export function CashScreen() {
         </Pressable>
         </Pulse>
         </Reveal>
+
+        <SessionsHistory refreshKey={closings} />
 
         <SectionHeader
           title="Mouvements"

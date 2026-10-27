@@ -26,6 +26,11 @@ export interface RecordMovementParams {
   paymentMethod?: PaymentMethod;
   occurredAt?: Date;
   createdBy?: string | null;
+  /**
+   * Hors session : la correction d'un écart de caisse passé ne doit pas
+   * compter dans l'attendu de la caisse ouverte aujourd'hui.
+   */
+  detached?: boolean;
 }
 
 /**
@@ -35,11 +40,16 @@ export interface RecordMovementParams {
  * Le solde est recalculé par un trigger PostgreSQL.
  */
 export async function recordMovement(tx: Tx, params: RecordMovementParams): Promise<string> {
+  // Rattaché à la caisse ouverte s'il y en a une : c'est ce qui permet, à la
+  // clôture, de calculer ce que le tiroir devrait contenir.
   const row = await tx.queryOne<{ id: string }>(
     `INSERT INTO cash_movements
        (restaurant_id, direction, amount, category, source_type, source_id,
-        payment_method, label, occurred_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, now()), $10)
+        payment_method, label, occurred_at, created_by, session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, now()), $10,
+             CASE WHEN $11 THEN NULL
+                  ELSE (SELECT id FROM cash_sessions WHERE restaurant_id = $1 AND status = 'open')
+             END)
      RETURNING id`,
     [
       params.restaurantId,
@@ -52,6 +62,7 @@ export async function recordMovement(tx: Tx, params: RecordMovementParams): Prom
       params.label,
       params.occurredAt ?? null,
       params.createdBy ?? null,
+      params.detached ?? false,
     ],
   );
   if (!row) throw new Error('Écriture du mouvement de caisse impossible.');

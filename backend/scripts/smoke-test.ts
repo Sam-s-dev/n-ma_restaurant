@@ -981,7 +981,8 @@ async function main(): Promise<void> {
     cashierProfile.body?.user,
   );
 
-  // Ce que le caissier peut faire.
+  // Ce que le caissier peut faire, une fois sa caisse ouverte.
+  await call('POST', '/api/cash/sessions/open', { token: cashier.token, body: { openingFloat: 0 } });
   const cashierSale = await call('POST', '/api/sales', {
     token: cashier.token,
     body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
@@ -1234,6 +1235,16 @@ async function main(): Promise<void> {
     token,
     body: { reason: 'Achat de test du magasinier' },
   });
+  // Tout ce qui est passé par cette caisse a été annulé : le tiroir est vide.
+  const emptyTill = await call('POST', '/api/cash/sessions/close', {
+    token: cashier.token,
+    body: { countedCash: 0 },
+  });
+  check(
+    'les annulations ramènent l’attendu à zéro',
+    emptyTill.body?.status === 'closed',
+    emptyTill.body,
+  );
 
   // ---------------------------------------------------------------------
   section('16 quater. Équipe et personnel liés');
@@ -1391,6 +1402,161 @@ async function main(): Promise<void> {
       (entry: any) => entry.action === 'cash.adjusted' && entry.userRole === 'cashier',
     ),
   );
+
+  // ---------------------------------------------------------------------
+  section('16 quinquies. Ouverture et clôture de caisse');
+
+  const tillLogin = await call('POST', '/api/auth/login', {
+    body: { email: `cuisinier.${stamp}@exemple.com`, password: colleaguePassword },
+  });
+  const till: string = tillLogin.body?.accessToken;
+  const balanceBeforeTill: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+
+  const saleWithoutTill = await call('POST', '/api/sales', {
+    token: till,
+    body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  check(
+    'le caissier ne vend pas tant que la caisse est fermée (409)',
+    saleWithoutTill.status === 409,
+    saleWithoutTill.body,
+  );
+
+  const opening = await call('POST', '/api/cash/sessions/open', {
+    token: till,
+    body: { openingFloat: 50000, breakdown: { '10000': 5 } },
+  });
+  check('le caissier ouvre la caisse avec son fond (201)', opening.status === 201, opening.body);
+  check('l’attendu ne lui est pas montré', opening.body?.expectedCash === undefined, opening.body);
+
+  const reopening = await call('POST', '/api/cash/sessions/open', {
+    token: till,
+    body: { openingFloat: 0 },
+  });
+  check('on n’ouvre pas deux caisses à la fois (409)', reopening.status === 409, reopening.body);
+
+  const tillSales: string[] = [];
+  for (const paymentMethod of ['cash', 'mobile_money']) {
+    const sale = await call('POST', '/api/sales', {
+      token: till,
+      body: { items: [{ dishId, quantity: 1 }], paymentMethod },
+    });
+    tillSales.push(sale.body?.id);
+  }
+  check('il encaisse dans la caisse ouverte', tillSales.every(Boolean), tillSales);
+
+  const wrongCount = await call('POST', '/api/cash/sessions/close', {
+    token: till,
+    body: { countedCash: 50000 },
+  });
+  check(
+    'un comptage faux sans motif est refusé, sans révéler l’écart (422)',
+    wrongCount.status === 422 && !JSON.stringify(wrongCount.body).includes('3500'),
+    wrongCount.body,
+  );
+
+  const closing = await call('POST', '/api/cash/sessions/close', {
+    token: till,
+    body: { countedCash: 53500, breakdown: { '10000': 5, '1000': 3, '500': 1 }, countedMobileMoney: 3500 },
+  });
+  check('le compte juste clôture la caisse', closing.body?.status === 'closed', closing.body);
+  check(
+    'le caissier ne voit toujours ni attendu ni écart',
+    closing.body?.expectedCash === undefined && closing.body?.cashDifference === undefined,
+    closing.body,
+  );
+
+  const sessionsList = await call('GET', '/api/cash/sessions', { token });
+  const firstSession = sessionsList.body?.items?.[0];
+  check(
+    'le gérant voit l’attendu, le compté et un écart nul',
+    firstSession?.expectedCash === 53500 && firstSession?.cashDifference === 0,
+    firstSession,
+  );
+  check(
+    'le ticket Z compte les deux ventes, par mode',
+    firstSession?.summary?.sales?.count === 2 &&
+      firstSession?.summary?.sales?.byMethod?.mobile_money?.total === 3500,
+    firstSession?.summary,
+  );
+
+  const deniedSessions = await call('GET', '/api/cash/sessions', { token: till });
+  check('l’historique des clôtures est réservé au gérant (403)', deniedSessions.status === 403, deniedSessions.status);
+
+  // Deuxième journée : il manque 500 FG dans le tiroir.
+  await call('POST', '/api/cash/sessions/open', { token: till, body: { openingFloat: 0 } });
+  const shortSale = await call('POST', '/api/sales', {
+    token: till,
+    body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  tillSales.push(shortSale.body?.id);
+  const shortClosing = await call('POST', '/api/cash/sessions/close', {
+    token: till,
+    body: { countedCash: 3000, note: 'Un billet de 500 introuvable' },
+  });
+  check('avec un motif, la clôture passe malgré l’écart', shortClosing.body?.status === 'closed', shortClosing.body);
+
+  const shortSession = await call('GET', `/api/cash/sessions/${shortClosing.body?.id}`, { token });
+  check('le gérant voit l’écart de −500', shortSession.body?.cashDifference === -500, shortSession.body);
+
+  const closeInbox = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant est notifié de l’écart, avec le motif',
+    closeInbox.body?.items?.some(
+      (n: any) => n.kind === 'cash.closed_with_difference' && n.body.includes('billet de 500'),
+    ),
+    closeInbox.body?.items?.map((n: any) => n.kind),
+  );
+
+  const balanceBeforeFix: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  const fix = await call('POST', `/api/cash/sessions/${shortClosing.body?.id}/correct`, { token });
+  check('le gérant corrige le solde de l’écart', Boolean(fix.body?.correctedAt), fix.body);
+  const balanceAfterFix: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('le solde baisse de 500', balanceAfterFix === balanceBeforeFix - 500, {
+    avant: balanceBeforeFix,
+    après: balanceAfterFix,
+  });
+  const fixAgain = await call('POST', `/api/cash/sessions/${shortClosing.body?.id}/correct`, { token });
+  check('un écart ne se corrige qu’une fois (409)', fixAgain.status === 409, fixAgain.body);
+
+  // Rapports et exports du jour.
+  const report = await call('GET', `/api/reports/summary?from=${today}&to=${today}`, { token });
+  check(
+    'le rapport de la période compte les clôtures et leur écart',
+    report.body?.sessions?.count >= 2 && report.body?.sessions?.totalCashDifference === -500,
+    report.body?.sessions,
+  );
+  check('il calcule le résultat (ventes − dépenses)', typeof report.body?.result === 'number', report.body);
+
+  const xlsx = await fetch(`${API}/api/reports/export.xlsx?from=${today}&to=${today}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const xlsxBytes = Buffer.from(await xlsx.arrayBuffer());
+  check(
+    'l’export Excel est un vrai classeur',
+    xlsx.status === 200 &&
+      (xlsx.headers.get('content-type') ?? '').includes('spreadsheetml') &&
+      xlsxBytes.subarray(0, 2).toString() === 'PK',
+    { status: xlsx.status, taille: xlsxBytes.byteLength },
+  );
+  const deniedExport = await call('GET', `/api/reports/summary?from=${today}&to=${today}`, {
+    token: till,
+  });
+  check('les rapports sont réservés au gérant (403)', deniedExport.status === 403, deniedExport.status);
+
+  // Remise en état pour la suite : ventes annulées, correction compensée.
+  for (const id of tillSales) {
+    await call('POST', `/api/sales/${id}/cancel`, { token, body: { reason: 'Test de clôture' } });
+  }
+  await call('POST', '/api/cash/adjustments', {
+    token,
+    body: { direction: 'in', amount: 500, label: 'Remise en état du test' },
+  });
+  const balanceAfterTill: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse revient à son état d’avant', balanceAfterTill === balanceBeforeTill, {
+    avant: balanceBeforeTill,
+    après: balanceAfterTill,
+  });
 
   // ---------------------------------------------------------------------
   section('17. Désactivation par le Super Admin (§2.a)');
