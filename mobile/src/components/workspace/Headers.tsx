@@ -14,8 +14,37 @@ interface WorkspaceHeaderProps {
   balance?: string;
   /** Logo du restaurant, quand il en a chargé un (§3). */
   logoUri?: string | null;
+  /** Cloche des notifications, posée avant le bouton de déconnexion. */
+  bell?: React.ReactNode;
   onPressAccount: () => void;
   onLogout: () => void;
+}
+
+interface BellButtonProps {
+  count: number;
+  onPress: () => void;
+}
+
+/** Cloche des notifications, avec le nombre de non lues. */
+export function BellButton({ count, onPress }: BellButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => [styles.bell, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={
+        count > 0 ? `Notifications, ${count} non lue(s)` : 'Notifications'
+      }
+    >
+      <Icon name="bell" size={18} color={colors.textPrimary} strokeWidth={2.1} />
+      {count > 0 && (
+        <View style={styles.bellBadge}>
+          <Text style={styles.bellBadgeText}>{count > 99 ? '99+' : String(count)}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
 }
 
 /**
@@ -30,6 +59,7 @@ export function WorkspaceHeader({
   greeting,
   balance,
   logoUri,
+  bell,
   onPressAccount,
   onLogout,
 }: WorkspaceHeaderProps) {
@@ -72,6 +102,8 @@ export function WorkspaceHeader({
           </Text>
         </View>
       )}
+
+      {bell}
 
       {/* Déconnexion à portée de pouce : plusieurs personnes se relaient
           sur le même téléphone en salle. */}
@@ -178,6 +210,36 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: radius.md,
+  },
+  bell: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    fontFamily: fontFamily.bold,
+    fontSize: 9,
+    lineHeight: 12,
+    color: colors.textOnPrimary,
   },
   logout: {
     width: 36,

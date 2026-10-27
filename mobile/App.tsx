@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { warmUpServer } from './src/api/client';
 import { useAppFonts } from './src/theme/fonts';
+import { setUpInstallation } from './src/utils/install';
 
 // Appelé en portée globale, comme le préconise la doc Expo SDK 54 : l'écran
 // de démarrage reste affiché jusqu'à ce que Poppins soit chargée, sinon la
@@ -21,6 +22,9 @@ SplashScreen.setOptions({ duration: 400, fade: true });
  * identifiants : la connexion, elle, répond alors du premier coup.
  */
 warmUpServer();
+
+// Version web : installable comme une application (Android, ordinateur, iPhone).
+setUpInstallation();
 
 export default function App() {
   const { fontsLoaded, fontError } = useAppFonts();

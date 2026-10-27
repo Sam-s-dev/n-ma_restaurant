@@ -9,6 +9,8 @@ import { dashboardRouter } from '../modules/dashboard/dashboard.routes';
 import { expensesRouter } from '../modules/expenses/expenses.routes';
 import { mediaRouter } from '../modules/media/media.routes';
 import { menuRouter } from '../modules/menu/menu.routes';
+import { notificationsRouter } from '../modules/notifications/notifications.routes';
+import { purchasesRouter } from '../modules/purchases/purchases.routes';
 import { restaurantRouter } from '../modules/restaurant/restaurant.routes';
 import { salesRouter } from '../modules/sales/sales.routes';
 import { staffRouter } from '../modules/staff/staff.routes';
@@ -41,5 +43,7 @@ restaurantSpace.use('/credits', creditsRouter);       // §8  Créances
 restaurantSpace.use('/expenses', expensesRouter);     // §9  Dépenses
 restaurantSpace.use('/dashboard', dashboardRouter);   // §10 Synthèse
 restaurantSpace.use('/audit', auditRouter);           // Journal d'activité
+restaurantSpace.use('/notifications', notificationsRouter);
+restaurantSpace.use('/purchases', purchasesRouter);   // Demandes d'achat
 
 apiRouter.use('/', restaurantSpace);

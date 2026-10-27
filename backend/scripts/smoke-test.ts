@@ -845,6 +845,12 @@ async function main(): Promise<void> {
   });
   check('création sans rôle refusée (400)', noRole.status === 400, noRole.body);
 
+  const noEmployee = await call('POST', '/api/users', {
+    token,
+    body: { fullName: 'Fatou Collègue', email: colleagueEmail, password: colleaguePassword, role: 'manager' },
+  });
+  check('création sans fiche employé refusée (400)', noEmployee.status === 400, noEmployee.body);
+
   const created = await call('POST', '/api/users', {
     token,
     body: {
@@ -853,16 +859,28 @@ async function main(): Promise<void> {
       password: colleaguePassword,
       phone: '620 33 44 55',
       role: 'manager',
+      employee: { position: 'Gérante adjointe', monthlySalary: 80000, hireDate: '2026-01-01' },
     },
   });
   check('compte du collègue créé (201)', created.status === 201, created.body);
   check('il n’est pas propriétaire', created.body?.isOwner === false, created.body);
   check('il a le rôle demandé', created.body?.role === 'manager', created.body);
   check('il est actif d’emblée', created.body?.isActive === true, created.body);
+  check(
+    'sa fiche employé est créée en même temps',
+    created.body?.employee?.position === 'Gérante adjointe',
+    created.body?.employee,
+  );
 
   const duplicate = await call('POST', '/api/users', {
     token,
-    body: { fullName: 'Doublon', email: colleagueEmail, password: colleaguePassword, role: 'cashier' },
+    body: {
+      fullName: 'Doublon',
+      email: colleagueEmail,
+      password: colleaguePassword,
+      role: 'cashier',
+      employee: { position: 'Serveur', hireDate: '2026-01-01' },
+    },
   });
   check('adresse déjà utilisée refusée (409)', duplicate.status === 409, duplicate.body);
 
@@ -896,6 +914,7 @@ async function main(): Promise<void> {
       email: `ephemere.${stamp}@exemple.com`,
       password: colleaguePassword,
       role: 'cashier',
+      employee: { position: 'Extra', hireDate: '2026-01-01' },
     },
   });
   const removed = await call('DELETE', `/api/users/${spare.body?.id}`, { token });
@@ -925,16 +944,29 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   section('16 bis. Rôles : caissier et magasinier');
 
-  async function member(role: string, name: string): Promise<{ id: string; token: string }> {
+  async function member(
+    role: string,
+    name: string,
+  ): Promise<{ id: string; token: string; employeeId: string }> {
     const email = `${role}.${stamp}@exemple.com`;
     const account = await call('POST', '/api/users', {
       token,
-      body: { fullName: name, email, password: colleaguePassword, role },
+      body: {
+        fullName: name,
+        email,
+        password: colleaguePassword,
+        role,
+        employee: { position: role === 'cashier' ? 'Caissier' : 'Magasinier', hireDate: '2026-01-01' },
+      },
     });
     const session = await call('POST', '/api/auth/login', {
       body: { email, password: colleaguePassword },
     });
-    return { id: account.body?.id, token: session.body?.accessToken };
+    return {
+      id: account.body?.id,
+      token: session.body?.accessToken,
+      employeeId: account.body?.employee?.id,
+    };
   }
 
   const cashier = await member('cashier', 'Mamadou Caissier');
@@ -1006,39 +1038,179 @@ async function main(): Promise<void> {
   await denied('modifier les paramètres', 'PATCH', '/api/restaurant', { name: 'Piraté' });
   await denied('lire le journal', 'GET', '/api/audit');
 
-  // Magasinier : stock et achats de marchandise, rien d'autre.
+  // Magasinier : le stock, le solde de la caisse, et des achats soumis à accord.
   const storeStock = await call('GET', '/api/stock', { token: storekeeper.token });
   check('le magasinier consulte le stock', storeStock.status === 200, storeStock.status);
 
-  const storePurchase = await call('POST', '/api/expenses', {
+  // La vente du caissier n'est pas encore annulée : la référence est le solde
+  // que voit le gérant à cet instant.
+  const managerBalance = await call('GET', '/api/cash/balance', { token });
+  const balanceNow: number = managerBalance.body?.balance;
+  const storeBalance = await call('GET', '/api/cash/balance', { token: storekeeper.token });
+  check(
+    'il voit le solde de la caisse',
+    storeBalance.body?.balance === balanceNow,
+    storeBalance.body,
+  );
+  check(
+    'mais pas les cumuls, qui révèlent le chiffre d’affaires',
+    storeBalance.body?.totalIn === undefined,
+    storeBalance.body,
+  );
+  const storeMovements = await call('GET', '/api/cash/movements', { token: storekeeper.token });
+  check('ni le détail des mouvements (403)', storeMovements.status === 403, storeMovements.status);
+
+  const directPurchase = await call('POST', '/api/expenses', {
     token: storekeeper.token,
     body: {
       amount: 4000,
       category: 'stock_purchase',
-      description: 'Achat de 2 kg de poulet',
+      description: 'Achat sans accord',
       stockItemId,
       quantity: 2,
     },
   });
-  check('il enregistre un achat de stock (201)', storePurchase.status === 201, storePurchase.body);
+  check('il ne peut plus acheter sans accord (403)', directPurchase.status === 403, directPurchase.status);
 
-  const bill = await call('POST', '/api/expenses', {
-    token: storekeeper.token,
-    body: { amount: 1000, category: 'bill', description: 'Facture électricité' },
-  });
-  check('il ne peut pas saisir une autre dépense (403)', bill.status === 403, bill.status);
-
-  const storeExpenses = await call('GET', '/api/expenses', { token: storekeeper.token });
-  check(
-    'il ne voit que les achats de stock',
-    storeExpenses.body?.items?.every((e: any) => e.category === 'stock_purchase'),
-    storeExpenses.body?.items?.map((e: any) => e.category),
-  );
   const storeSale = await call('POST', '/api/sales', {
     token: storekeeper.token,
     body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
   });
   check('il ne peut pas vendre (403)', storeSale.status === 403, storeSale.status);
+
+  // ---------------------------------------------------------------------
+  section('16 ter. Demandes d’achat et notifications');
+
+  const purchaseRequest = await call('POST', '/api/purchases', {
+    token: storekeeper.token,
+    body: { stockItemId, quantity: 2, estimatedAmount: 4000, reason: 'Stock de poulet bas' },
+  });
+  check('le magasinier fait une demande (201)', purchaseRequest.status === 201, purchaseRequest.body);
+  check('elle attend la décision', purchaseRequest.body?.status === 'pending', purchaseRequest.body);
+  const requestId: string = purchaseRequest.body?.id;
+
+  const managerInbox = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant est notifié de la demande',
+    managerInbox.body?.items?.some(
+      (n: any) => n.kind === 'purchase.requested' && n.entityId === requestId,
+    ),
+    managerInbox.body,
+  );
+  check('la notification compte comme non lue', managerInbox.body?.unreadCount >= 1, managerInbox.body);
+
+  const selfApproval = await call('POST', `/api/purchases/${requestId}/approve`, {
+    token: storekeeper.token,
+    body: {},
+  });
+  check('il ne peut pas approuver lui-même (403)', selfApproval.status === 403, selfApproval.status);
+
+  const unapprovedCompletion = await call('POST', `/api/purchases/${requestId}/complete`, {
+    token: storekeeper.token,
+    body: { amount: 4000 },
+  });
+  check('il ne peut pas acheter avant l’accord (409)', unapprovedCompletion.status === 409, unapprovedCompletion.body);
+
+  const approval = await call('POST', `/api/purchases/${requestId}/approve`, {
+    token,
+    body: { approvedAmount: 5000, note: 'Pas plus de 5 000' },
+  });
+  check('le gérant approuve avec un plafond', approval.body?.approvedAmount === 5000, approval.body);
+
+  const overBudget = await call('POST', `/api/purchases/${requestId}/complete`, {
+    token: storekeeper.token,
+    body: { amount: 6000 },
+  });
+  check('un achat au-delà du plafond est refusé (422)', overBudget.status === 422, overBudget.body);
+
+  const stockBefore = await call('GET', `/api/stock/${stockItemId}`, { token });
+  const completion = await call('POST', `/api/purchases/${requestId}/complete`, {
+    token: storekeeper.token,
+    body: { amount: 4500 },
+  });
+  check('l’achat est effectué', completion.body?.status === 'completed', completion.body);
+  check('il est rattaché à une dépense', Boolean(completion.body?.expenseId), completion.body);
+
+  const stockAfterPurchase = await call('GET', `/api/stock/${stockItemId}`, { token });
+  check(
+    'la marchandise entre en stock',
+    stockAfterPurchase.body?.quantity === (stockBefore.body?.quantity ?? 0) + 2,
+    { avant: stockBefore.body?.quantity, après: stockAfterPurchase.body?.quantity },
+  );
+  const balanceAfterPurchase = await call('GET', '/api/cash/balance', { token });
+  check(
+    'le montant payé sort de la caisse',
+    balanceAfterPurchase.body?.balance === balanceNow - 4500,
+    balanceAfterPurchase.body,
+  );
+
+  const newProduct = await call('POST', '/api/purchases', {
+    token: storekeeper.token,
+    body: { itemName: 'Huile de palme', unit: 'l', quantity: 5, estimatedAmount: 15000 },
+  });
+  check('demande pour un produit pas encore en stock (201)', newProduct.status === 201, newProduct.body);
+  const refusal = await call('POST', `/api/purchases/${newProduct.body?.id}/reject`, {
+    token,
+    body: { note: 'Il en reste au marché' },
+  });
+  check('le gérant refuse avec un motif', refusal.body?.status === 'rejected', refusal.body);
+
+  const storeInbox = await call('GET', '/api/notifications', { token: storekeeper.token });
+  const storeKinds: string[] = storeInbox.body?.items?.map((n: any) => n.kind) ?? [];
+  check('le magasinier est notifié de l’accord', storeKinds.includes('purchase.approved'), storeKinds);
+  check('et du refus', storeKinds.includes('purchase.rejected'), storeKinds);
+
+  const managerInboxAfter = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant est notifié de l’achat effectué',
+    managerInboxAfter.body?.items?.some((n: any) => n.kind === 'purchase.completed'),
+    managerInboxAfter.body?.items?.map((n: any) => n.kind),
+  );
+
+  const storeRequests = await call('GET', '/api/purchases', { token: storekeeper.token });
+  check('il retrouve ses deux demandes', storeRequests.body?.items?.length === 2, storeRequests.body);
+
+  // Seuil d'alerte franchi : magasinier et gérant sont prévenus une fois.
+  const currentQuantity: number = stockAfterPurchase.body?.quantity ?? 0;
+  await call('PATCH', `/api/stock/${stockItemId}`, {
+    token,
+    body: { alertThreshold: currentQuantity - 0.5 },
+  });
+  await call('POST', `/api/stock/${stockItemId}/adjustments`, {
+    token: storekeeper.token,
+    body: { direction: 'out', quantity: 1, reason: 'loss', note: 'Poulet abîmé' },
+  });
+  const lowInbox = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant reçoit l’alerte de stock bas',
+    lowInbox.body?.items?.some((n: any) => n.kind === 'stock.low'),
+    lowInbox.body?.items?.map((n: any) => n.kind),
+  );
+  await call('POST', `/api/stock/${stockItemId}/adjustments`, {
+    token,
+    body: { direction: 'in', quantity: 1, note: 'Remise en état du test' },
+  });
+  await call('PATCH', `/api/stock/${stockItemId}`, { token, body: { alertThreshold: 0 } });
+
+  const since = new Date().toISOString();
+  const nothingNew = await call(
+    'GET',
+    `/api/notifications?since=${encodeURIComponent(since)}`,
+    { token: storekeeper.token },
+  );
+  check(
+    'l’interrogation régulière ne renvoie que les nouveautés',
+    nothingNew.body?.items?.length === 0,
+    nothingNew.body,
+  );
+
+  const readAll = await call('POST', '/api/notifications/read', {
+    token: storekeeper.token,
+    body: { all: true },
+  });
+  check('tout marquer comme lu', readAll.body?.updated >= 2, readAll.body);
+  const storeInboxRead = await call('GET', '/api/notifications', { token: storekeeper.token });
+  check('plus rien de non lu', storeInboxRead.body?.unreadCount === 0, storeInboxRead.body);
 
   // Le gérant défait ce qui doit l'être : caisse et stock reviennent à l'état
   // attendu par la suite du test.
@@ -1047,10 +1219,111 @@ async function main(): Promise<void> {
     body: { reason: 'Vente de test du caissier' },
   });
   check('le gérant annule la vente du caissier', managerCancel.status === 200, managerCancel.body);
-  await call('POST', `/api/expenses/${storePurchase.body?.id}/cancel`, {
+  const cashierInbox = await call('GET', '/api/notifications', { token: cashier.token });
+  check(
+    'le caissier est prévenu de l’annulation, avec le motif',
+    cashierInbox.body?.items?.some(
+      (n: any) => n.kind === 'sale.cancelled' && n.body.includes('Vente de test du caissier'),
+    ),
+    cashierInbox.body,
+  );
+  await call('POST', `/api/expenses/${completion.body?.expenseId}/cancel`, {
     token,
     body: { reason: 'Achat de test du magasinier' },
   });
+
+  // ---------------------------------------------------------------------
+  section('16 quater. Équipe et personnel liés');
+
+  const staffList = await call('GET', '/api/staff', { token });
+  const colleagueSheet = staffList.body?.items?.find((e: any) => e.account?.userId === created.body?.id);
+  check(
+    'le compte créé depuis l’équipe figure dans le personnel',
+    colleagueSheet?.fullName === 'Fatou Collègue' && colleagueSheet?.account?.role === 'manager',
+    staffList.body?.items,
+  );
+
+  const cook = await call('POST', '/api/staff', {
+    token,
+    body: { fullName: 'Ibrahima Cuisinier', position: 'Cuisinier', hireDate: '2026-02-01', monthlySalary: 60000 },
+  });
+  check('un employé sans compte est créé', cook.status === 201 && cook.body?.account === null, cook.body);
+
+  const withoutAccount = await call('GET', '/api/staff?withoutAccount=true', { token });
+  check(
+    'il apparaît parmi les employés sans accès',
+    withoutAccount.body?.items?.some((e: any) => e.id === cook.body?.id) &&
+      !withoutAccount.body?.items?.some((e: any) => e.id === colleagueSheet?.id),
+    withoutAccount.body?.items?.map((e: any) => e.fullName),
+  );
+
+  const cookAccount = await call('POST', '/api/users', {
+    token,
+    body: {
+      fullName: 'Ibrahima Cuisinier',
+      email: `cuisinier.${stamp}@exemple.com`,
+      password: colleaguePassword,
+      role: 'cashier',
+      employeeId: cook.body?.id,
+    },
+  });
+  check(
+    'on lui donne un accès à partir de sa fiche',
+    cookAccount.status === 201 && cookAccount.body?.employee?.id === cook.body?.id,
+    cookAccount.body,
+  );
+  const secondAccount = await call('POST', '/api/users', {
+    token,
+    body: {
+      fullName: 'Doublon Cuisinier',
+      email: `cuisinier2.${stamp}@exemple.com`,
+      password: colleaguePassword,
+      role: 'cashier',
+      employeeId: cook.body?.id,
+    },
+  });
+  check('une fiche ne porte qu’un seul compte (409)', secondAccount.status === 409, secondAccount.body);
+
+  const lockedSheet = await call('DELETE', `/api/staff/${cook.body?.id}`, { token });
+  check(
+    'on ne retire pas la fiche d’un employé qui a encore un accès (409)',
+    lockedSheet.status === 409,
+    lockedSheet.body,
+  );
+
+  const late = await call('POST', `/api/staff/${storekeeper.employeeId}/attendances`, {
+    token,
+    body: { day: '2026-03-02', status: 'late', arrivalTime: '09:40', note: 'Bus en panne' },
+  });
+  check('retard pointé avec l’heure d’arrivée', late.body?.arrivalTime === '09:40', late.body);
+
+  const badArrival = await call('POST', `/api/staff/${storekeeper.employeeId}/attendances`, {
+    token,
+    body: { day: '2026-03-03', status: 'absent', arrivalTime: '09:00' },
+  });
+  check('pas d’heure d’arrivée pour une absence (400)', badArrival.status === 400, badArrival.body);
+
+  const warning = await call('POST', `/api/staff/${storekeeper.employeeId}/notes`, {
+    token,
+    body: { kind: 'warning', note: 'Troisième retard ce mois-ci', occurredOn: '2026-03-02' },
+  });
+  check('avertissement noté sur la fiche (201)', warning.status === 201, warning.body);
+
+  const activity = await call('GET', `/api/staff/${storekeeper.employeeId}/activity`, { token });
+  const activityKinds: string[] = activity.body?.items?.map((a: any) => a.kind) ?? [];
+  check(
+    'l’historique réunit le retard et l’avertissement',
+    activityKinds.includes('late') && activityKinds.includes('warning'),
+    activity.body,
+  );
+
+  const employeeInbox = await call('GET', '/api/notifications', { token: storekeeper.token });
+  const employeeKinds: string[] = employeeInbox.body?.items?.map((n: any) => n.kind) ?? [];
+  check(
+    'l’employé est prévenu de son retard et de l’avertissement',
+    employeeKinds.includes('attendance.late') && employeeKinds.includes('employee.warning'),
+    employeeKinds,
+  );
 
   // Changement de rôle.
   const ownerDemotion = await call('PATCH', `/api/users/${login.body?.profile?.user?.id}`, {
@@ -1094,7 +1367,7 @@ async function main(): Promise<void> {
   check(
     'l’achat du magasinier y figure',
     journal.body?.items?.some(
-      (entry: any) => entry.action === 'expense.created' && entry.userRole === 'storekeeper',
+      (entry: any) => entry.action === 'purchase.completed' && entry.userRole === 'storekeeper',
     ),
     actions,
   );

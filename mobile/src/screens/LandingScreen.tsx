@@ -1,4 +1,5 @@
 import { Image, Linking, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { InstallAppCard } from '../components/InstallAppCard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
@@ -95,6 +96,7 @@ export function LandingScreen({ onRegister, onLogin }: LandingScreenProps) {
       <View style={styles.ctaGroup}>
         <Button label={hero.primaryCta} onPress={onRegister} variant="primary" />
         <Button label={hero.secondaryCta} onPress={onLogin} variant="secondary" />
+        <InstallAppCard />
       </View>
 
       {/* ------------------------ Bandeau d'accroche ---------------------- */}

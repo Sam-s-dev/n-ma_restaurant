@@ -1,7 +1,10 @@
 import { badRequest, conflict, notFound } from '../../core/errors';
-import type { Role } from '../../core/permissions';
+import { ROLE_LABELS, type Role } from '../../core/permissions';
+import { notify } from '../notifications/notifications.service';
 import { buildUpdate } from '../../core/sqlBuilder';
 import { query, queryOne } from '../../db/pool';
+import { withTransaction, type Tx } from '../../db/transaction';
+import { round2 } from '../../utils/money';
 import { hashPassword } from '../../utils/password';
 import { generateOpaqueToken } from '../../utils/tokens';
 import { revokeAllSessions } from '../auth/session.service';
@@ -17,6 +20,8 @@ export interface Member {
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Fiche employé rattachée ; absente pour un compte créé avant le lien. */
+  employee: { id: string; position: string } | null;
 }
 
 interface MemberRow {
@@ -29,10 +34,16 @@ interface MemberRow {
   is_active: boolean;
   last_login_at: Date | null;
   created_at: Date;
+  employee_id: string | null;
+  employee_position: string | null;
 }
 
-const MEMBER_COLUMNS =
-  'id, email, full_name, phone, is_owner, role, is_active, last_login_at, created_at';
+const MEMBER_SELECT = `
+  SELECT u.id, u.email, u.full_name, u.phone, u.is_owner, u.role, u.is_active,
+         u.last_login_at, u.created_at,
+         e.id AS employee_id, e.position AS employee_position
+    FROM users u
+    LEFT JOIN employees e ON e.user_id = u.id`;
 
 const toMember = (row: MemberRow): Member => ({
   id: row.id,
@@ -44,22 +55,60 @@ const toMember = (row: MemberRow): Member => ({
   isActive: row.is_active,
   lastLoginAt: row.last_login_at?.toISOString() ?? null,
   createdAt: row.created_at.toISOString(),
+  employee: row.employee_id
+    ? { id: row.employee_id, position: row.employee_position ?? '' }
+    : null,
 });
 
 export async function listMembers(restaurantId: string): Promise<Member[]> {
   const rows = await query<MemberRow>(
-    `SELECT ${MEMBER_COLUMNS}
-       FROM users WHERE restaurant_id = $1
-      ORDER BY is_owner DESC, role = 'manager' DESC, full_name`,
+    `${MEMBER_SELECT} WHERE u.restaurant_id = $1
+      ORDER BY u.is_owner DESC, u.role = 'manager' DESC, u.full_name`,
     [restaurantId],
   );
   return rows.map(toMember);
+}
+
+async function getMember(restaurantId: string, memberId: string): Promise<Member> {
+  const row = await queryOne<MemberRow>(
+    `${MEMBER_SELECT} WHERE u.id = $1 AND u.restaurant_id = $2`,
+    [memberId, restaurantId],
+  );
+  if (!row) throw notFound('Utilisateur');
+  return toMember(row);
+}
+
+/** Rattache un compte à une fiche employé qui n'en a pas encore. */
+async function linkEmployee(
+  tx: Tx,
+  restaurantId: string,
+  employeeId: string,
+  userId: string,
+): Promise<void> {
+  const employee = await tx.queryOne<{ user_id: string | null; is_active: boolean }>(
+    'SELECT user_id, is_active FROM employees WHERE id = $1 AND restaurant_id = $2 FOR UPDATE',
+    [employeeId, restaurantId],
+  );
+  if (!employee) throw notFound('Employé');
+  if (!employee.is_active) throw conflict('Cet employé ne fait plus partie du personnel.');
+  if (employee.user_id && employee.user_id !== userId) {
+    throw conflict('Cet employé a déjà un compte dans l’application.');
+  }
+  await tx.query(
+    'UPDATE employees SET user_id = NULL WHERE user_id = $1 AND restaurant_id = $2',
+    [userId, restaurantId],
+  );
+  await tx.query('UPDATE employees SET user_id = $1 WHERE id = $2', [userId, employeeId]);
 }
 
 /**
  * §2.b — Le gérant crée directement le compte d'un collègue, avec le rôle
  * qui correspond à son poste. Le statut de propriétaire reste attaché au
  * créateur de l'espace, seul compte impossible à désactiver.
+ *
+ * Le compte naît toujours rattaché à une fiche employé : celle qui existe
+ * déjà, ou une nouvelle créée dans la même transaction. Ainsi personne n'a
+ * accès à l'application sans salaire ni pointage.
  */
 export async function createMember(
   restaurantId: string,
@@ -88,15 +137,37 @@ export async function createMember(
 
   const passwordHash = await hashPassword(input.password);
 
-  const row = await queryOne<MemberRow>(
-    `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, role)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING ${MEMBER_COLUMNS}`,
-    [restaurantId, input.email, passwordHash, input.fullName, input.phone ?? null, input.role],
-  );
-  if (!row) throw new Error('Création du compte impossible.');
+  const userId = await withTransaction(async (tx) => {
+    const row = await tx.queryOne<{ id: string }>(
+      `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, role)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [restaurantId, input.email, passwordHash, input.fullName, input.phone ?? null, input.role],
+    );
+    if (!row) throw new Error('Création du compte impossible.');
 
-  return toMember(row);
+    if (input.employeeId) {
+      await linkEmployee(tx, restaurantId, input.employeeId, row.id);
+    } else if (input.employee) {
+      await tx.query(
+        `INSERT INTO employees
+           (restaurant_id, full_name, position, phone, hire_date, monthly_salary, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          restaurantId,
+          input.fullName,
+          input.employee.position,
+          input.phone ?? null,
+          input.employee.hireDate,
+          round2(input.employee.monthlySalary),
+          row.id,
+        ],
+      );
+    }
+    return row.id;
+  });
+
+  return getMember(restaurantId, userId);
 }
 
 /**
@@ -159,27 +230,47 @@ export async function updateMember(
     if (target.is_owner) throw badRequest('Le créateur de l’espace reste gérant.');
   }
 
-  const { setClause, values, nextIndex } = buildUpdate(input, {
-    fullName: 'full_name',
-    phone: 'phone',
-    isActive: 'is_active',
-    role: 'role',
-  });
+  const { employeeId, ...fields } = input;
+  const hasFields = Object.values(fields).some((value) => value !== undefined);
+  if (!hasFields && !employeeId) throw badRequest('Aucun champ à mettre à jour.');
 
-  const row = await queryOne<MemberRow>(
-    `UPDATE users SET ${setClause}
-      WHERE id = $${nextIndex} AND restaurant_id = $${nextIndex + 1}
-      RETURNING ${MEMBER_COLUMNS}`,
-    [...values, memberId, restaurantId],
-  );
-  if (!row) throw notFound('Utilisateur');
+  await withTransaction(async (tx) => {
+    if (hasFields) {
+      const { setClause, values, nextIndex } = buildUpdate(fields, {
+        fullName: 'full_name',
+        phone: 'phone',
+        isActive: 'is_active',
+        role: 'role',
+      });
+      await tx.query(
+        `UPDATE users SET ${setClause}
+          WHERE id = $${nextIndex} AND restaurant_id = $${nextIndex + 1}`,
+        [...values, memberId, restaurantId],
+      );
+    }
+    if (employeeId) await linkEmployee(tx, restaurantId, employeeId, memberId);
+  });
 
   // Un nouveau rôle oblige à se reconnecter : l'application recharge alors
   // les écrans auxquels la personne a droit. Le serveur, lui, applique le
   // changement dès la requête suivante.
   if (input.isActive === false || roleChanges) await revokeAllSessions('user', memberId);
 
-  return toMember(row);
+  const member = await getMember(restaurantId, memberId);
+
+  if (roleChanges) {
+    await notify({
+      restaurantId,
+      to: { userIds: [memberId] },
+      kind: 'member.role_changed',
+      title: 'Votre rôle a changé',
+      body: `Vous êtes désormais ${ROLE_LABELS[member.role].toLowerCase()}. Vos écrans ont été mis à jour.`,
+      route: 'settings',
+      entityId: memberId,
+    });
+  }
+
+  return member;
 }
 
 export interface Invitation {

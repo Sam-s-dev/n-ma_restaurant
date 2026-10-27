@@ -23,8 +23,10 @@ export type Permission =
   | 'menu.manage'
   | 'stock.view'
   | 'stock.manage'
-  | 'expenses.stock_purchase'
   | 'expenses.manage'
+  | 'purchases.request'
+  | 'purchases.approve'
+  | 'cash.balance'
   | 'cash.view'
   | 'cash.manage'
   | 'dashboard.view'
@@ -46,7 +48,8 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   manager: 'Tout le restaurant : caisse, finances, personnel, équipe et réglages.',
   cashier:
     'Encaisse les ventes, gère les clients et les remboursements. Ne voit ni la caisse ni les chiffres.',
-  storekeeper: 'Tient le stock et enregistre les achats de marchandise.',
+  storekeeper:
+    'Tient le stock et voit le solde de la caisse. Demande les achats, qu’il effectue après votre accord.',
 };
 
 /**

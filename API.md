@@ -59,8 +59,8 @@ restaurant concerné.
 | Méthode | Route | Rôle |
 |---|---|---|
 | `GET` | `/api/users` | Membres du restaurant |
-| `POST` | `/api/users` | Créer un compte (`fullName`, `email`, `password`, `phone?`, `role`) |
-| `PATCH` | `/api/users/:id` | Renommer / activer / désactiver / changer de rôle |
+| `POST` | `/api/users` | Créer un compte (`fullName`, `email`, `password`, `phone?`, `role`, et `employeeId` **ou** `employee: { position, monthlySalary, hireDate }`) |
+| `PATCH` | `/api/users/:id` | Renommer / activer / désactiver / changer de rôle / rattacher (`employeeId`) |
 | `DELETE` | `/api/users/:id` | Retirer de l'équipe (désactive si le compte a saisi des écritures) |
 | `POST` | `/api/users/invitations` | Inviter (`{ "email": "…", "role": "cashier" }`) — renvoie le `token` **une seule fois** |
 | `GET` | `/api/users/invitations/list` | Invitations en attente |
@@ -83,9 +83,11 @@ refusé, mais c'est le serveur qui contrôle : toute action interdite répond `4
 | Consulter le menu, marquer un plat disponible ou épuisé | ✅ | ✅ | — |
 | Créer ou modifier un plat, gérer les catégories | ✅ | — | — |
 | Stock : consulter, corriger, déclarer une perte | ✅ | — | ✅ |
-| Dépenses : achat de stock | ✅ | — | ✅ (ne voit que les achats) |
-| Autres dépenses, annulation de dépense | ✅ | — | — |
-| Caisse, tableau de bord, plats vedettes | ✅ | — | — |
+| Voir le solde de la caisse (sans les cumuls ni les mouvements) | ✅ | — | ✅ |
+| Demander un achat, l'effectuer une fois approuvé | ✅ | — | ✅ (ses demandes seulement) |
+| Approuver ou refuser une demande d'achat | ✅ | — | — |
+| Dépenses (toutes catégories), annulation de dépense | ✅ | — | — |
+| Caisse détaillée, tableau de bord, plats vedettes | ✅ | — | — |
 | Personnel et salaires, équipe, paramètres, journal | ✅ | — | — |
 
 - Le créateur de l'espace reste gérant ; personne ne peut changer son propre rôle.
@@ -105,6 +107,42 @@ l'action (`sale.cancelled`, `cash.adjusted`, `dish.updated`, `member.updated`…
 l'objet concerné et les détails saisis (motif, montant, nouveau prix), sans
 mot de passe. Seules les actions réussies sont inscrites. Le journal est en
 écriture seule : rien ne s'y modifie ni ne s'y efface.
+
+### Notifications
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/notifications` | Les siennes + `unreadCount` (`?since=<ISO>&limit=`) |
+| `POST` | `/api/notifications/read` | `{ "ids": ["…"] }` ou `{ "all": true }` |
+
+L'application interroge `?since=` toutes les 10 secondes : seules les
+nouveautés reviennent. Chaque destinataire a sa propre ligne (lu / non lu).
+
+| Événement (`kind`) | Destinataires |
+|---|---|
+| `purchase.requested` | Comptes qui approuvent les achats |
+| `purchase.approved`, `purchase.rejected` | Le demandeur |
+| `purchase.completed` | Les approbateurs et le demandeur (sauf l'auteur) |
+| `stock.low` | Comptes qui voient le stock, au moment où le seuil est franchi |
+| `sale.cancelled` | Le caissier qui avait encaissé la vente |
+| `member.role_changed` | La personne concernée |
+| `attendance.late`, `attendance.absent`, `employee.*` | L'employé, s'il a un compte |
+
+## Demandes d'achat
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/purchases` | Liste (`?status=`) + `pendingCount`, `approvedCount` |
+| `POST` | `/api/purchases` | Demander (`stockItemId` ou `itemName` + `unit`, `quantity`, `estimatedAmount`, `reason?`) |
+| `GET` | `/api/purchases/:id` | Détail |
+| `POST` | `/api/purchases/:id/approve` | Approuver (`approvedAmount?` = plafond, `note?`) |
+| `POST` | `/api/purchases/:id/reject` | Refuser (`note` obligatoire) |
+| `POST` | `/api/purchases/:id/complete` | Acheter (`amount` ≤ plafond, `quantity?`, `paymentMethod?`) |
+| `POST` | `/api/purchases/:id/cancel` | Retirer la demande (demandeur ou gérant) |
+
+`pending → approved → completed`, ou `pending → rejected`, ou `→ cancelled`.
+L'achat crée la dépense `stock_purchase` (− Caisse, + Stock) dans la même
+transaction ; un produit demandé par son nom est créé à ce moment-là.
 
 ---
 
@@ -135,7 +173,7 @@ l'en-tête déclaré. Les images identiques sont dédupliquées.
 
 | Méthode | Route | Rôle |
 |---|---|---|
-| `GET` | `/api/staff` | Liste (`?search=&includeInactive=true`) |
+| `GET` | `/api/staff` | Liste (`?search=&includeInactive=true&withoutAccount=true`), avec `account` si l'employé a un accès |
 | `POST` | `/api/staff` | Créer une fiche |
 | `GET` | `/api/staff/:id` | Fiche + solde salarial |
 | `PATCH` | `/api/staff/:id` | Modifier |
@@ -143,7 +181,9 @@ l'en-tête déclaré. Les images identiques sont dédupliquées.
 | `GET` | `/api/staff/attendances?from=&to=` | Feuille de présence |
 | `POST` | `/api/staff/attendances` | Pointer toute l'équipe en une fois |
 | `GET` | `/api/staff/:id/attendances?from=&to=` | Pointage d'un employé |
-| `POST` | `/api/staff/:id/attendances` | Pointer (`{ "day": "2026-08-23", "status": "present" }`) |
+| `POST` | `/api/staff/:id/attendances` | Pointer (`{ "day": "2026-08-23", "status": "late", "arrivalTime": "09:40" }` — `present`, `late`, `absent`, `leave`) |
+| `GET` | `/api/staff/:id/activity` | Historique : notes et pointages hors présence normale |
+| `POST` | `/api/staff/:id/notes` | Noter (`kind`: `late`, `absence`, `warning`, `praise`, `note` ; `note` ; `occurredOn?`) |
 | `GET` | `/api/staff/:id/salary` | Solde + historique des paiements |
 | `POST` | `/api/staff/:id/salary/payments` | Payer (`{ "amount": 50000, "periodMonth": "2026-08" }`) |
 | `POST` | `/api/staff/:id/salary/payments/:paymentId/cancel` | Annuler un paiement |

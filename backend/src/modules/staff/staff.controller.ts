@@ -6,6 +6,7 @@ import * as service from './staff.service';
 import {
   attendanceRangeSchema,
   bulkAttendanceSchema,
+  createEmployeeNoteSchema,
   createEmployeeSchema,
   listEmployeesSchema,
   markAttendanceSchema,
@@ -19,6 +20,21 @@ const paymentParams = z.object({
   paymentId: z.string().uuid('Identifiant de paiement invalide.'),
 });
 const cancelSchema = z.object({ reason: z.string().trim().min(3).max(255) });
+
+// --- Activités -----------------------------------------------------------
+
+export async function listActivity(req: Request, res: Response) {
+  const user = currentUser(req);
+  const { id } = parseOrThrow(idParam, req.params, 'requête');
+  res.json({ items: await service.listEmployeeActivity(user.restaurantId, id) });
+}
+
+export async function addNote(req: Request, res: Response) {
+  const user = currentUser(req);
+  const { id } = parseOrThrow(idParam, req.params, 'requête');
+  const input = parseOrThrow(createEmployeeNoteSchema, req.body, 'note');
+  res.status(201).json(await service.addEmployeeNote(user.restaurantId, id, user.id, input));
+}
 
 // --- Fiches employés -----------------------------------------------------
 

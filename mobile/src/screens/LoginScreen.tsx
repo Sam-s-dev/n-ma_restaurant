@@ -256,8 +256,8 @@ export function LoginScreen({
 
         {waking && (
           <Text style={styles.waking}>
-            Réveil du serveur en cours… la première connexion de la journée peut demander une
-            vingtaine de secondes.
+            Réveil du serveur en cours… la première connexion après une pause peut demander
+            jusqu’à une minute. Inutile d’appuyer à nouveau : l’application réessaie toute seule.
           </Text>
         )}
 

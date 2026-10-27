@@ -6,9 +6,9 @@ import * as controller from './expenses.controller';
 
 export const expensesRouter = Router();
 
-// Le magasinier n'enregistre que des achats de stock : le contrôleur
-// vérifie la catégorie et filtre la liste en conséquence.
-expensesRouter.use(requirePermission('expenses.manage', 'expenses.stock_purchase'));
+// Réservé au gérant : le magasinier passe par une demande d'achat
+// (module purchases), que le gérant approuve avant toute sortie d'argent.
+expensesRouter.use(requirePermission('expenses.manage'));
 
 expensesRouter.get('/categories', asyncHandler(controller.categories));
 expensesRouter.get('/', asyncHandler(controller.listExpenses));
@@ -16,7 +16,6 @@ expensesRouter.post('/', audited('expense.created'), asyncHandler(controller.cre
 expensesRouter.get('/:id', asyncHandler(controller.getExpense));
 expensesRouter.post(
   '/:id/cancel',
-  requirePermission('expenses.manage'),
   audited('expense.cancelled'),
   asyncHandler(controller.cancelExpense),
 );

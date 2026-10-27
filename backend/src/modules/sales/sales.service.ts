@@ -6,6 +6,7 @@ import { withTransaction } from '../../db/transaction';
 import { round2 } from '../../utils/money';
 import { recordMovement, reverseMovements } from '../cash/cash.service';
 import { resolveOrCreateCustomer } from '../customers/customers.service';
+import { notify } from '../notifications/notifications.service';
 import type { CreateSaleInput, ListSalesInput } from './sales.schemas';
 
 export interface SaleItemView {
@@ -421,6 +422,7 @@ export async function cancelSale(
   saleId: string,
   userId: string,
   reason: string,
+  actorName?: string,
 ): Promise<Sale> {
   await withTransaction(async (tx) => {
     const sale = await tx.queryOne<{
@@ -428,8 +430,9 @@ export async function cancelSale(
       reference: string;
       status: string;
       total_amount: number;
+      created_by: string | null;
     }>(
-      `SELECT id, reference, status, total_amount FROM sales
+      `SELECT id, reference, status, total_amount, created_by FROM sales
         WHERE id = $1 AND restaurant_id = $2 FOR UPDATE`,
       [saleId, restaurantId],
     );
@@ -480,6 +483,22 @@ export async function cancelSale(
       `UPDATE sales SET status = 'cancelled', cancelled_at = now(), cancel_reason = $1
         WHERE id = $2 AND restaurant_id = $3`,
       [reason, saleId, restaurantId],
+    );
+
+    // Le caissier apprend que son ticket a été annulé, et pourquoi.
+    await notify(
+      {
+        restaurantId,
+        to: { userIds: [sale.created_by] },
+        exceptUserId: userId,
+        kind: 'sale.cancelled',
+        title: 'Une de vos ventes a été annulée',
+        body: `${sale.reference} : « ${reason} »`,
+        route: 'sales',
+        entityId: saleId,
+        actorName: actorName ?? null,
+      },
+      tx,
     );
   });
 

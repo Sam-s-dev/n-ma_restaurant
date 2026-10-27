@@ -4,12 +4,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
 import { SceneSwitch } from '../../components/workspace/Motion';
-import { ScreenHeader, WorkspaceHeader } from '../../components/workspace/Headers';
+import { BellButton, ScreenHeader, WorkspaceHeader } from '../../components/workspace/Headers';
 import { TabBar } from '../../components/workspace/TabBar';
 import type { TabDefinition } from '../../components/workspace/TabBar';
 import { Toast } from '../../components/workspace/Toast';
 import type { ToastMessage } from '../../components/workspace/Toast';
 import { fetchSummary } from '../../api/workspace/dashboard';
+import { fetchBalance } from '../../api/workspace/cash';
+import { listNotifications, markNotificationsRead } from '../../api/workspace/notifications';
+import type { AppNotification } from '../../api/workspace/notifications';
+import { playNotificationSound, unlockNotificationSound } from '../../utils/notificationSound';
 import { fetchProfile } from '../../api/workspace/settings';
 import { saveProfile } from '../../api/session';
 import { mediaUrl, THUMB } from '../../api/client';
@@ -35,6 +39,8 @@ import { CreditsScreen } from './CreditsScreen';
 import { CustomersScreen } from './CustomersScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { AuditScreen } from './AuditScreen';
+import { PurchasesScreen } from './PurchasesScreen';
+import { NotificationsScreen } from './NotificationsScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 
 interface WorkspaceScreenProps {
@@ -56,7 +62,12 @@ const TITLES: Record<WorkspaceRoute, string> = {
   customers: 'Clients',
   settings: 'Paramètres',
   audit: 'Journal d’activité',
+  purchases: 'Demandes d’achat',
+  notifications: 'Notifications',
 };
+
+/** Interrogation des notifications : assez vite pour ressembler à une messagerie. */
+const NOTIFICATION_POLL_MS = 10_000;
 
 const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>, 'key'>> = {
   dashboard: { label: 'Accueil', icon: 'home' },
@@ -70,6 +81,8 @@ const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>
   staff: { label: 'Personnel', icon: 'users' },
   settings: { label: 'Compte', icon: 'settings' },
   audit: { label: 'Journal', icon: 'clock' },
+  purchases: { label: 'Achats', icon: 'cart' },
+  notifications: { label: 'Alertes', icon: 'bell' },
   more: { label: 'Plus', icon: 'grid' },
 };
 
@@ -81,8 +94,9 @@ const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>
  * une dépendance de plus, et cela laisse la main sur l'en-tête, qui doit
  * afficher le solde de caisse en permanence (§7).
  *
- * Les onglets dépendent du rôle : le caissier arrive sur l'écran de vente,
- * le magasinier sur le stock, et aucun des deux ne voit le solde.
+ * Les onglets dépendent du rôle : le caissier arrive sur l'écran de vente
+ * et ne voit pas le solde, le magasinier arrive sur le stock et voit le
+ * solde, sans le détail.
  */
 export function WorkspaceScreen({
   profile,
@@ -96,7 +110,7 @@ export function WorkspaceScreen({
   );
   const home = homeRouteFor(profile);
   const tabRoutes = tabRoutesFor(profile);
-  const showsBalance = can('cash.view');
+  const showsBalance = can('cash.view') || can('cash.balance');
 
   /*
    * Pile de navigation plutôt qu'une simple route courante : le bouton
@@ -125,14 +139,21 @@ export function WorkspaceScreen({
    * d'alerte de la barre d'onglets. Un seul appel pour les deux.
    */
   const refreshBalance = useCallback(() => {
-    // Le résumé est réservé au gérant : inutile d'essuyer un refus.
-    if (!can('dashboard.view')) return;
-    fetchSummary()
-      .then((summary) => {
-        setBalance(summary.cash.balance);
-        setAlerts({ stock: summary.stock.lowCount, credits: summary.credits.openCount });
-      })
-      .catch(() => undefined);
+    if (can('dashboard.view')) {
+      fetchSummary()
+        .then((summary) => {
+          setBalance(summary.cash.balance);
+          setAlerts({ stock: summary.stock.lowCount, credits: summary.credits.openCount });
+        })
+        .catch(() => undefined);
+      return;
+    }
+    // Le magasinier n'a pas le résumé, seulement le solde.
+    if (can('cash.balance')) {
+      fetchBalance()
+        .then((result) => setBalance(result.balance))
+        .catch(() => undefined);
+    }
   }, [can]);
 
   useEffect(refreshBalance, [refreshBalance]);
@@ -140,6 +161,72 @@ export function WorkspaceScreen({
   const notify = useCallback((text: string, tone: 'success' | 'danger' = 'success') => {
     toastId.current += 1;
     setToast({ id: toastId.current, text, tone });
+  }, []);
+
+  // --- Notifications ------------------------------------------------------
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const latestSeen = useRef<string | null>(null);
+
+  /*
+   * Interrogation toutes les dix secondes tant que l'espace est ouvert. Les
+   * nouveautés jouent un son et s'annoncent en bas d'écran ; le premier
+   * chargement, lui, reste silencieux — ce ne sont pas des nouveautés.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const releaseSound = unlockNotificationSound();
+
+    async function poll(initial: boolean) {
+      try {
+        const page = await listNotifications(
+          latestSeen.current ? { since: latestSeen.current, limit: 20 } : { limit: 50 },
+        );
+        if (cancelled) return;
+        setUnreadCount(page.unreadCount);
+
+        const newest = page.items[0];
+        if (!newest) return;
+        latestSeen.current = newest.createdAt;
+        setNotifications((current) =>
+          initial ? page.items : [...page.items, ...current].slice(0, 100),
+        );
+
+        if (!initial) {
+          playNotificationSound();
+          notify(page.items.length > 1 ? `${page.items.length} nouvelles notifications` : newest.title);
+          // Un achat approuvé, une vente annulée : le solde a pu bouger.
+          refreshBalance();
+        }
+      } catch {
+        // Réseau coupé : on réessaiera au prochain passage.
+      }
+    }
+
+    void poll(true);
+    const timer = setInterval(() => void poll(false), NOTIFICATION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      releaseSound();
+    };
+  }, [notify, refreshBalance]);
+
+  // Sur navigateur, le titre de l'onglet porte le compteur, comme une messagerie.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    document.title = unreadCount > 0 ? `(${unreadCount}) N’ma Restaurant` : 'N’ma Restaurant';
+  }, [unreadCount]);
+
+  const markRead = useCallback((ids: string[] | 'all') => {
+    const now = new Date().toISOString();
+    setNotifications((current) =>
+      current.map((item) =>
+        ids === 'all' || ids.includes(item.id) ? { ...item, readAt: item.readAt ?? now } : item,
+      ),
+    );
+    setUnreadCount((count) => (ids === 'all' ? 0 : Math.max(0, count - ids.length)));
+    markNotificationsRead(ids).catch(() => undefined);
   }, []);
 
   const reloadProfile = useCallback(() => {
@@ -200,9 +287,14 @@ export function WorkspaceScreen({
     ...(key === 'more' ? { badge: alerts.stock + alerts.credits } : {}),
   }));
 
+  const bell = <BellButton count={unreadCount} onPress={() => navigate('notifications')} />;
+
   const contextValue = {
     profile,
     can,
+    notifications,
+    unreadCount,
+    markRead,
     currency,
     money,
     balance,
@@ -223,6 +315,7 @@ export function WorkspaceScreen({
               greeting={`Bonjour ${profile.user.fullName.split(' ')[0] ?? ''}`}
               balance={showsBalance ? money(balance) : undefined}
               logoUri={mediaUrl(profile.restaurant.logoMediaId, THUMB.small)}
+              bell={bell}
               onPressAccount={() => navigate('settings')}
               onLogout={() => setLogoutOpen(true)}
             />
@@ -240,6 +333,7 @@ export function WorkspaceScreen({
                       </Text>
                     </View>
                   )}
+                  {route !== 'notifications' && bell}
                   <Pressable
                     onPress={() => setLogoutOpen(true)}
                     hitSlop={8}
@@ -304,6 +398,10 @@ function renderRoute(route: WorkspaceRoute) {
       return <SettingsScreen />;
     case 'audit':
       return <AuditScreen />;
+    case 'purchases':
+      return <PurchasesScreen />;
+    case 'notifications':
+      return <NotificationsScreen />;
     default:
       return null;
   }

@@ -1,13 +1,15 @@
 import { badRequest, conflict, notFound } from '../../core/errors';
 import { buildUpdate } from '../../core/sqlBuilder';
 import { query, queryOne } from '../../db/pool';
-import { withTransaction } from '../../db/transaction';
+import { withTransaction, type Tx } from '../../db/transaction';
 import { round2 } from '../../utils/money';
 import { reverseMovements } from '../cash/cash.service';
 import { insertExpense } from '../expenses/expenses.service';
+import { notify } from '../notifications/notifications.service';
 import type {
   BulkAttendanceInput,
   CreateEmployeeInput,
+  CreateEmployeeNoteInput,
   ListEmployeesInput,
   MarkAttendanceInput,
   PaySalaryInput,
@@ -30,6 +32,8 @@ export interface Employee {
   photoMediaId: string | null;
   photoUrl: string | null;
   note: string | null;
+  /** Compte de l'application rattaché à cet employé, s'il en a un. */
+  account: { userId: string; email: string; role: string; isActive: boolean } | null;
   salary?: SalaryBalance;
 }
 
@@ -53,6 +57,10 @@ interface EmployeeRow {
   end_date: string | null;
   photo_media_id: string | null;
   note: string | null;
+  user_id: string | null;
+  user_email: string | null;
+  user_role: string | null;
+  user_active: boolean | null;
 }
 
 const toEmployee = (row: EmployeeRow): Employee => ({
@@ -67,35 +75,46 @@ const toEmployee = (row: EmployeeRow): Employee => ({
   photoMediaId: row.photo_media_id,
   photoUrl: row.photo_media_id ? `/api/media/${row.photo_media_id}` : null,
   note: row.note,
+  account: row.user_id
+    ? {
+        userId: row.user_id,
+        email: row.user_email ?? '',
+        role: row.user_role ?? '',
+        isActive: row.user_active ?? false,
+      }
+    : null,
 });
 
 const SELECT = `
-  SELECT id, full_name, position, phone, hire_date, monthly_salary,
-         is_active, end_date, photo_media_id, note
-    FROM employees`;
+  SELECT e.id, e.full_name, e.position, e.phone, e.hire_date, e.monthly_salary,
+         e.is_active, e.end_date, e.photo_media_id, e.note,
+         e.user_id, u.email AS user_email, u.role AS user_role, u.is_active AS user_active
+    FROM employees e
+    LEFT JOIN users u ON u.id = e.user_id`;
 
 export async function listEmployees(
   restaurantId: string,
   input: ListEmployeesInput,
 ): Promise<Employee[]> {
-  const conditions = ['restaurant_id = $1'];
+  const conditions = ['e.restaurant_id = $1'];
   const params: unknown[] = [restaurantId];
 
-  if (!input.includeInactive) conditions.push('is_active');
+  if (!input.includeInactive) conditions.push('e.is_active');
+  if (input.withoutAccount) conditions.push('e.user_id IS NULL');
   if (input.search) {
     params.push(`%${input.search}%`);
-    conditions.push(`(full_name ILIKE $${params.length} OR position ILIKE $${params.length})`);
+    conditions.push(`(e.full_name ILIKE $${params.length} OR e.position ILIKE $${params.length})`);
   }
 
   const rows = await query<EmployeeRow>(
-    `${SELECT} WHERE ${conditions.join(' AND ')} ORDER BY is_active DESC, full_name`,
+    `${SELECT} WHERE ${conditions.join(' AND ')} ORDER BY e.is_active DESC, e.full_name`,
     params,
   );
   return rows.map(toEmployee);
 }
 
 export async function getEmployee(restaurantId: string, id: string): Promise<Employee> {
-  const row = await queryOne<EmployeeRow>(`${SELECT} WHERE id = $1 AND restaurant_id = $2`, [
+  const row = await queryOne<EmployeeRow>(`${SELECT} WHERE e.id = $1 AND e.restaurant_id = $2`, [
     id,
     restaurantId,
   ]);
@@ -158,6 +177,20 @@ export async function updateEmployee(
 }
 
 export async function deleteEmployee(restaurantId: string, id: string): Promise<void> {
+  // Retirer la fiche laisserait un compte actif sans employé derrière : on
+  // demande de couper l'accès d'abord, là où il a été donné.
+  const linked = await queryOne<{ user_active: boolean }>(
+    `SELECT u.is_active AS user_active
+       FROM employees e JOIN users u ON u.id = e.user_id
+      WHERE e.id = $1 AND e.restaurant_id = $2`,
+    [id, restaurantId],
+  );
+  if (linked?.user_active) {
+    throw conflict(
+      'Cet employé a un compte dans l’application. Retirez d’abord son accès (Paramètres → L’équipe).',
+    );
+  }
+
   const paid = await queryOne<{ count: number }>(
     'SELECT count(*)::int AS count FROM salary_payments WHERE employee_id = $1',
     [id],
@@ -191,7 +224,79 @@ export interface Attendance {
   employeeName?: string;
   day: string;
   status: string;
+  arrivalTime: string | null;
   note: string | null;
+}
+
+interface AttendanceRow {
+  id: string;
+  employee_id: string;
+  employee_name?: string;
+  day: string;
+  status: string;
+  arrival_time: string | null;
+  note: string | null;
+}
+
+const toAttendance = (row: AttendanceRow): Attendance => ({
+  id: row.id,
+  employeeId: row.employee_id,
+  ...(row.employee_name !== undefined ? { employeeName: row.employee_name } : {}),
+  day: row.day,
+  status: row.status,
+  // PostgreSQL renvoie « 08:45:00 » : les secondes n'intéressent personne.
+  arrivalTime: row.arrival_time ? row.arrival_time.slice(0, 5) : null,
+  note: row.note,
+});
+
+const UPSERT_ATTENDANCE = `
+  INSERT INTO attendances (restaurant_id, employee_id, day, status, arrival_time, note, created_by)
+  SELECT $1, $2, $3, $4, $5, $6, $7
+   WHERE EXISTS (SELECT 1 FROM employees WHERE id = $2 AND restaurant_id = $1)
+  ON CONFLICT (employee_id, day)
+  DO UPDATE SET status = EXCLUDED.status, arrival_time = EXCLUDED.arrival_time,
+                note = EXCLUDED.note
+  RETURNING id, employee_id, day, status, arrival_time, note`;
+
+const ATTENDANCE_LABELS: Record<string, string> = {
+  late: 'en retard',
+  absent: 'absent',
+};
+
+/**
+ * Un retard ou une absence pointés sont signalés à l'intéressé, s'il a un
+ * compte : il le découvre sur le moment plutôt qu'au jour de la paie.
+ */
+async function notifyAttendance(
+  tx: Tx,
+  restaurantId: string,
+  actorId: string,
+  attendance: Attendance,
+): Promise<void> {
+  const label = ATTENDANCE_LABELS[attendance.status];
+  if (!label) return;
+
+  const employee = await tx.queryOne<{ user_id: string | null }>(
+    'SELECT user_id FROM employees WHERE id = $1 AND restaurant_id = $2',
+    [attendance.employeeId, restaurantId],
+  );
+  if (!employee?.user_id) return;
+
+  await notify(
+    {
+      restaurantId,
+      to: { userIds: [employee.user_id] },
+      exceptUserId: actorId,
+      kind: `attendance.${attendance.status}`,
+      title: attendance.status === 'late' ? 'Retard noté' : 'Absence notée',
+      body: `Vous avez été pointé ${label} le ${attendance.day}${
+        attendance.arrivalTime ? ` (arrivée à ${attendance.arrivalTime})` : ''
+      }${attendance.note ? ` : « ${attendance.note} »` : '.'}`,
+      route: 'settings',
+      entityId: attendance.id,
+    },
+    tx,
+  );
 }
 
 export async function markAttendance(
@@ -200,35 +305,22 @@ export async function markAttendance(
   userId: string,
   input: MarkAttendanceInput,
 ): Promise<Attendance> {
-  const employee = await queryOne('SELECT 1 FROM employees WHERE id = $1 AND restaurant_id = $2', [
-    employeeId,
-    restaurantId,
-  ]);
-  if (!employee) throw notFound('Employé');
+  return withTransaction(async (tx) => {
+    const row = await tx.queryOne<AttendanceRow>(UPSERT_ATTENDANCE, [
+      restaurantId,
+      employeeId,
+      input.day,
+      input.status,
+      input.arrivalTime ?? null,
+      input.note ?? null,
+      userId,
+    ]);
+    if (!row) throw notFound('Employé');
 
-  const row = await queryOne<{
-    id: string;
-    employee_id: string;
-    day: string;
-    status: string;
-    note: string | null;
-  }>(
-    `INSERT INTO attendances (restaurant_id, employee_id, day, status, note, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (employee_id, day)
-     DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note
-     RETURNING id, employee_id, day, status, note`,
-    [restaurantId, employeeId, input.day, input.status, input.note ?? null, userId],
-  );
-  if (!row) throw new Error('Enregistrement du pointage impossible.');
-
-  return {
-    id: row.id,
-    employeeId: row.employee_id,
-    day: row.day,
-    status: row.status,
-    note: row.note,
-  };
+    const attendance = toAttendance(row);
+    await notifyAttendance(tx, restaurantId, userId, attendance);
+    return attendance;
+  });
 }
 
 /** Pointage de toute l'équipe en une fois, pour la journée. */
@@ -240,29 +332,20 @@ export async function markAttendanceBulk(
   return withTransaction(async (tx) => {
     const results: Attendance[] = [];
     for (const entry of input.entries) {
-      const row = await tx.queryOne<{
-        id: string;
-        employee_id: string;
-        day: string;
-        status: string;
-        note: string | null;
-      }>(
-        `INSERT INTO attendances (restaurant_id, employee_id, day, status, note, created_by)
-         SELECT $1, $2, $3, $4, $5, $6
-          WHERE EXISTS (SELECT 1 FROM employees WHERE id = $2 AND restaurant_id = $1)
-         ON CONFLICT (employee_id, day)
-         DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note
-         RETURNING id, employee_id, day, status, note`,
-        [restaurantId, entry.employeeId, input.day, entry.status, entry.note ?? null, userId],
-      );
+      const row = await tx.queryOne<AttendanceRow>(UPSERT_ATTENDANCE, [
+        restaurantId,
+        entry.employeeId,
+        input.day,
+        entry.status,
+        entry.arrivalTime ?? null,
+        entry.note ?? null,
+        userId,
+      ]);
       if (!row) throw badRequest(`Employé inconnu dans ce restaurant : ${entry.employeeId}`);
-      results.push({
-        id: row.id,
-        employeeId: row.employee_id,
-        day: row.day,
-        status: row.status,
-        note: row.note,
-      });
+
+      const attendance = toAttendance(row);
+      await notifyAttendance(tx, restaurantId, userId, attendance);
+      results.push(attendance);
     }
     return results;
   });
@@ -283,15 +366,9 @@ export async function listAttendances(
     conditions.push(`a.employee_id = $${params.length}`);
   }
 
-  const rows = await query<{
-    id: string;
-    employee_id: string;
-    employee_name: string;
-    day: string;
-    status: string;
-    note: string | null;
-  }>(
-    `SELECT a.id, a.employee_id, e.full_name AS employee_name, a.day, a.status, a.note
+  const rows = await query<AttendanceRow>(
+    `SELECT a.id, a.employee_id, e.full_name AS employee_name, a.day, a.status,
+            a.arrival_time::text AS arrival_time, a.note
        FROM attendances a
        JOIN employees e ON e.id = a.employee_id
       WHERE ${conditions.join(' AND ')}
@@ -299,13 +376,139 @@ export async function listAttendances(
     params,
   );
 
+  return rows.map(toAttendance);
+}
+
+// -------------------------------------------------------------------------
+// Activités d'un employé
+// -------------------------------------------------------------------------
+
+export interface EmployeeActivity {
+  id: string;
+  /** Une note écrite par le gérant, ou un pointage hors présence normale. */
+  source: 'note' | 'attendance';
+  kind: string;
+  day: string;
+  note: string | null;
+  arrivalTime: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+const NOTE_TITLES: Record<string, string> = {
+  late: 'Retard noté',
+  absence: 'Absence notée',
+  warning: 'Avertissement',
+  praise: 'Félicitations',
+  note: 'Note ajoutée à votre fiche',
+};
+
+export async function addEmployeeNote(
+  restaurantId: string,
+  employeeId: string,
+  userId: string,
+  input: CreateEmployeeNoteInput,
+): Promise<EmployeeActivity> {
+  return withTransaction(async (tx) => {
+    const employee = await tx.queryOne<{ user_id: string | null }>(
+      'SELECT user_id FROM employees WHERE id = $1 AND restaurant_id = $2',
+      [employeeId, restaurantId],
+    );
+    if (!employee) throw notFound('Employé');
+
+    const row = await tx.queryOne<{ id: string; occurred_on: string; created_at: Date }>(
+      `INSERT INTO employee_notes (restaurant_id, employee_id, kind, note, occurred_on, created_by)
+       VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6)
+       RETURNING id, occurred_on, created_at`,
+      [restaurantId, employeeId, input.kind, input.note, input.occurredOn ?? null, userId],
+    );
+    if (!row) throw new Error('Enregistrement de la note impossible.');
+
+    await notify(
+      {
+        restaurantId,
+        to: { userIds: [employee.user_id] },
+        exceptUserId: userId,
+        kind: `employee.${input.kind}`,
+        title: NOTE_TITLES[input.kind] ?? 'Note ajoutée à votre fiche',
+        body: input.note,
+        route: 'settings',
+        entityId: row.id,
+      },
+      tx,
+    );
+
+    const author = await tx.queryOne<{ full_name: string }>(
+      'SELECT full_name FROM users WHERE id = $1',
+      [userId],
+    );
+
+    return {
+      id: row.id,
+      source: 'note',
+      kind: input.kind,
+      day: row.occurred_on,
+      note: input.note,
+      arrivalTime: null,
+      createdByName: author?.full_name ?? null,
+      createdAt: row.created_at.toISOString(),
+    };
+  });
+}
+
+/**
+ * Historique d'un employé : les notes du gérant et les pointages qui
+ * sortent de l'ordinaire (retards, absences, congés), du plus récent au plus
+ * ancien. Les présences normales n'y figurent pas : elles noieraient le reste.
+ */
+export async function listEmployeeActivity(
+  restaurantId: string,
+  employeeId: string,
+  limit = 100,
+): Promise<EmployeeActivity[]> {
+  const employee = await queryOne('SELECT 1 FROM employees WHERE id = $1 AND restaurant_id = $2', [
+    employeeId,
+    restaurantId,
+  ]);
+  if (!employee) throw notFound('Employé');
+
+  const rows = await query<{
+    id: string;
+    source: 'note' | 'attendance';
+    kind: string;
+    day: string;
+    note: string | null;
+    arrival_time: string | null;
+    created_by_name: string | null;
+    created_at: Date;
+  }>(
+    `SELECT * FROM (
+       SELECT n.id, 'note' AS source, n.kind, n.occurred_on AS day, n.note,
+              NULL::text AS arrival_time, u.full_name AS created_by_name, n.created_at
+         FROM employee_notes n
+         LEFT JOIN users u ON u.id = n.created_by
+        WHERE n.employee_id = $1 AND n.restaurant_id = $2
+       UNION ALL
+       SELECT a.id, 'attendance', a.status, a.day, a.note,
+              a.arrival_time::text, u.full_name, a.created_at
+         FROM attendances a
+         LEFT JOIN users u ON u.id = a.created_by
+        WHERE a.employee_id = $1 AND a.restaurant_id = $2 AND a.status <> 'present'
+     ) activity
+     ORDER BY day DESC, created_at DESC
+     LIMIT $3`,
+    [employeeId, restaurantId, limit],
+  );
+
   return rows.map((row) => ({
     id: row.id,
-    employeeId: row.employee_id,
-    employeeName: row.employee_name,
+    source: row.source,
+    kind: row.kind,
     day: row.day,
-    status: row.status,
     note: row.note,
+    arrivalTime: row.arrival_time ? row.arrival_time.slice(0, 5) : null,
+    createdByName: row.created_by_name,
+    createdAt: row.created_at.toISOString(),
   }));
 }
 

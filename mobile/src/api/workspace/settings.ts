@@ -27,6 +27,8 @@ export interface Member {
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Fiche employé rattachée ; absente pour un compte créé avant le lien. */
+  employee: { id: string; position: string } | null;
 }
 
 export interface Invitation {
@@ -84,6 +86,9 @@ export function createMember(payload: {
   password: string;
   phone?: string | null;
   role: Role;
+  /** Un employé déjà enregistré, ou sa fiche à créer : l'un des deux. */
+  employeeId?: string;
+  employee?: { position: string; monthlySalary: number; hireDate: string };
 }): Promise<Member> {
   return authed<Member>('/api/users', { method: 'POST', body: payload });
 }
@@ -91,7 +96,13 @@ export function createMember(payload: {
 /** Un changement de rôle déconnecte la personne : elle retrouve ses écrans à jour. */
 export function updateMember(
   id: string,
-  payload: { fullName?: string; phone?: string | null; isActive?: boolean; role?: Role },
+  payload: {
+    fullName?: string;
+    phone?: string | null;
+    isActive?: boolean;
+    role?: Role;
+    employeeId?: string;
+  },
 ): Promise<Member> {
   return authed<Member>(`/api/users/${id}`, { method: 'PATCH', body: payload });
 }

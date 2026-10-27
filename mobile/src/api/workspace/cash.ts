@@ -13,8 +13,9 @@ export type CashCategory =
 
 export interface CashBalance {
   balance: number;
-  totalIn: number;
-  totalOut: number;
+  /** Absents pour un rôle qui n'a droit qu'au solde (magasinier). */
+  totalIn?: number;
+  totalOut?: number;
   updatedAt: string | null;
 }
 

@@ -1,7 +1,30 @@
 import { authed, queryString } from '../authed';
 
 /** §4 — Personnel : fiches, pointage, salaires. */
-export type AttendanceStatus = 'present' | 'absent' | 'leave';
+export type AttendanceStatus = 'present' | 'late' | 'absent' | 'leave';
+
+/** Ce que le gérant note sur la fiche d'un employé. */
+export type NoteKind = 'late' | 'absence' | 'warning' | 'praise' | 'note';
+
+export const NOTE_LABELS: Record<NoteKind, string> = {
+  late: 'Retard',
+  absence: 'Absence',
+  warning: 'Avertissement',
+  praise: 'Félicitations',
+  note: 'Remarque',
+};
+
+/** Une ligne de l'historique : note du gérant, ou pointage hors présence normale. */
+export interface EmployeeActivity {
+  id: string;
+  source: 'note' | 'attendance';
+  kind: string;
+  day: string;
+  note: string | null;
+  arrivalTime: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
 
 export interface SalaryBalance {
   monthlySalary: number;
@@ -24,6 +47,8 @@ export interface Employee {
   photoMediaId: string | null;
   photoUrl: string | null;
   note: string | null;
+  /** Accès à l'application, quand l'employé en a un. */
+  account: { userId: string; email: string; role: string; isActive: boolean } | null;
   salary?: SalaryBalance;
 }
 
@@ -33,6 +58,8 @@ export interface Attendance {
   employeeName?: string;
   day: string;
   status: AttendanceStatus;
+  /** « 09:40 », surtout utile pour un retard. */
+  arrivalTime: string | null;
   note: string | null;
 }
 
@@ -55,20 +82,35 @@ export interface SalaryOverview {
 
 export const ATTENDANCE_LABELS: Record<AttendanceStatus, string> = {
   present: 'Présent',
+  late: 'Retard',
   absent: 'Absent',
   leave: 'Congé',
 };
 
 export async function listEmployees(
-  filters: { search?: string; includeInactive?: boolean } = {},
+  filters: { search?: string; includeInactive?: boolean; withoutAccount?: boolean } = {},
 ): Promise<Employee[]> {
   const { items } = await authed<{ items: Employee[] }>(
     `/api/staff${queryString({
       search: filters.search,
       includeInactive: filters.includeInactive ? 'true' : undefined,
+      withoutAccount: filters.withoutAccount ? 'true' : undefined,
     })}`,
   );
   return items;
+}
+
+export async function listEmployeeActivity(id: string): Promise<EmployeeActivity[]> {
+  const { items } = await authed<{ items: EmployeeActivity[] }>(`/api/staff/${id}/activity`);
+  return items;
+}
+
+/** Retard, absence, avertissement, félicitations : prévient l'employé s'il a un compte. */
+export function addEmployeeNote(
+  id: string,
+  payload: { kind: NoteKind; note: string; occurredOn?: string },
+): Promise<EmployeeActivity> {
+  return authed<EmployeeActivity>(`/api/staff/${id}/notes`, { method: 'POST', body: payload });
 }
 
 export function getEmployee(id: string): Promise<Employee> {
@@ -115,7 +157,12 @@ export async function listAttendances(from: string, to: string): Promise<Attenda
 /** Pointage collectif d'une journée, enregistré en une fois. */
 export async function markAttendances(
   day: string,
-  entries: Array<{ employeeId: string; status: AttendanceStatus }>,
+  entries: Array<{
+    employeeId: string;
+    status: AttendanceStatus;
+    arrivalTime?: string | null;
+    note?: string | null;
+  }>,
 ): Promise<Attendance[]> {
   const { items } = await authed<{ items: Attendance[] }>('/api/staff/attendances', {
     method: 'POST',

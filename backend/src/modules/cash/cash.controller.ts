@@ -1,13 +1,20 @@
 import type { Request, Response } from 'express';
 import { parseOrThrow } from '../../core/validate';
 import { dateRangeSchema } from '../../core/pagination';
-import { currentUser } from '../../middlewares/auth';
+import { can, currentUser } from '../../middlewares/auth';
 import * as service from './cash.service';
 import { adjustCashSchema, contributeCashSchema, listMovementsSchema } from './cash.schemas';
 
 export async function getBalance(req: Request, res: Response) {
   const user = currentUser(req);
-  res.json(await service.getBalance(user.restaurantId));
+  const balance = await service.getBalance(user.restaurantId);
+  // Les cumuls d'entrées et de sorties révèlent le chiffre d'affaires :
+  // qui n'a droit qu'au solde ne reçoit que le solde.
+  if (!can(req, 'cash.view')) {
+    res.json({ balance: balance.balance, updatedAt: balance.updatedAt });
+    return;
+  }
+  res.json(balance);
 }
 
 export async function listMovements(req: Request, res: Response) {

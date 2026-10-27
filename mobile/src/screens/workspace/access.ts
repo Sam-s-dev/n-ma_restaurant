@@ -10,13 +10,15 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
   cash: ['cash.view'],
   menu: ['menu.view'],
   stock: ['stock.view'],
-  expenses: ['expenses.manage', 'expenses.stock_purchase'],
+  expenses: ['expenses.manage'],
+  purchases: ['purchases.request', 'purchases.approve'],
   staff: ['staff.manage'],
   credits: ['credits.view'],
   customers: ['customers.manage'],
   audit: ['audit.view'],
   // Le compte personnel (mot de passe, déconnexion) est ouvert à tous.
   settings: null,
+  notifications: null,
   more: null,
 };
 
@@ -31,7 +33,7 @@ const TAB_CANDIDATES: WorkspaceRoute[] = [
   'cash',
   'menu',
   'stock',
-  'expenses',
+  'purchases',
   'credits',
 ];
 

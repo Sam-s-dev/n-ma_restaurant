@@ -73,6 +73,9 @@ export function login(email: string, password: string): Promise<LoginResponse> {
   return request<LoginResponse>('/api/auth/login', {
     method: 'POST',
     body: { email, password },
+    // Rejouer une connexion n'enregistre rien : sans danger, et c'est le
+    // premier appel qui tombe sur un serveur endormi.
+    retry: true,
   });
 }
 

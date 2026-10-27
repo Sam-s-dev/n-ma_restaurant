@@ -35,11 +35,13 @@ export const PERMISSIONS = [
   // Stock
   'stock.view',
   'stock.manage',
-  // Dépenses
-  'expenses.stock_purchase',
-  'expenses.manage', // toutes catégories, annulation, liste complète
+  // Dépenses et achats
+  'expenses.manage',
+  'purchases.request', // demander un achat, puis l'effectuer une fois approuvé
+  'purchases.approve',
   // Caisse et finances
-  'cash.view',
+  'cash.balance', // le solde seul, pour savoir ce qu'on peut demander
+  'cash.view', // solde, mouvements et répartition
   'cash.manage',
   'dashboard.view',
   // Administration
@@ -65,8 +67,14 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'menu.availability',
   ]),
 
-  // Le magasinier tient le stock et enregistre les achats de marchandise.
-  storekeeper: new Set<Permission>(['stock.view', 'stock.manage', 'expenses.stock_purchase']),
+  // Le magasinier tient le stock. Il voit ce qu'il y a en caisse pour
+  // calibrer ses demandes, mais n'achète qu'après l'accord du gérant.
+  storekeeper: new Set<Permission>([
+    'stock.view',
+    'stock.manage',
+    'cash.balance',
+    'purchases.request',
+  ]),
 };
 
 export function isRole(value: unknown): value is Role {

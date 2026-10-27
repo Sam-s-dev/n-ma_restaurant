@@ -49,6 +49,8 @@ export type IconName =
   | 'map-pin'
   | 'lock'
   | 'send'
+  | 'bell'
+  | 'cart'
   | 'more';
 
 interface IconProps {
@@ -389,6 +391,23 @@ function renderPaths(name: IconName, s: StrokeProps, color: string) {
         <>
           <Line x1="21.5" y1="2.5" x2="10.5" y2="13.5" {...s} />
           <Path d="M21.5 2.5 14.5 21.5l-4-8-8-4z" {...s} />
+        </>
+      );
+
+    case 'bell':
+      return (
+        <>
+          <Path d="M18 8.5a6 6 0 0 0-12 0c0 6.5-2.8 8.5-2.8 8.5h17.6S18 15 18 8.5z" {...s} />
+          <Path d="M13.7 20.5a2 2 0 0 1-3.4 0" {...s} />
+        </>
+      );
+
+    case 'cart':
+      return (
+        <>
+          <Path d="M2.5 3.5h2.8l2.4 11.2a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.6-1.2l1.7-7.3H6.2" {...s} />
+          <Circle cx="9.5" cy="20" r="1.3" {...s} />
+          <Circle cx="17.5" cy="20" r="1.3" {...s} />
         </>
       );
 

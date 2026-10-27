@@ -71,6 +71,14 @@ const MODULES: ModuleTile[] = [
     caption: () => 'Carnet d’adresses',
   },
   {
+    route: 'purchases',
+    label: 'Achats',
+    icon: 'cart',
+    background: colors.pastelAmber,
+    color: colors.iconAmber,
+    caption: () => 'Demandes du magasinier',
+  },
+  {
     route: 'audit',
     label: 'Journal',
     icon: 'clock',

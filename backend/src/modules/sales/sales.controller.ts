@@ -48,7 +48,9 @@ export async function cancelSale(req: Request, res: Response) {
   const user = currentUser(req);
   const { id } = parseOrThrow(idParam, req.params, 'requête');
   const input = parseOrThrow(cancelSaleSchema, req.body, 'requête');
-  res.json(await service.cancelSale(user.restaurantId, id, user.id, input.reason));
+  res.json(
+    await service.cancelSale(user.restaurantId, id, user.id, input.reason, user.fullName),
+  );
 }
 
 export async function topDishes(req: Request, res: Response) {

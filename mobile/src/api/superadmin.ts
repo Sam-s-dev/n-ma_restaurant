@@ -56,6 +56,7 @@ export function login(email: string, password: string): Promise<AdminLoginRespon
   return request<AdminLoginResponse>('/api/super-admin/login', {
     method: 'POST',
     body: { email, password },
+    retry: true,
   });
 }
 

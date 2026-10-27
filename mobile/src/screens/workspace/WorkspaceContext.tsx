@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { Profile } from '../../api/auth';
 import type { Permission } from '../../api/permissions';
+import type { AppNotification } from '../../api/workspace/notifications';
 import type { Currency } from '../../utils/money';
 
 /** Routes de l'espace restaurant : cinq onglets et des modules secondaires. */
@@ -16,10 +17,17 @@ export type WorkspaceRoute =
   | 'credits'
   | 'customers'
   | 'settings'
-  | 'audit';
+  | 'audit'
+  | 'purchases'
+  | 'notifications';
 
 export interface WorkspaceContextValue {
   profile: Profile;
+  /** Notifications reçues, de la plus récente à la plus ancienne. */
+  notifications: AppNotification[];
+  unreadCount: number;
+  /** Marque lues les notifications indiquées, ou toutes. */
+  markRead: (ids: string[] | 'all') => void;
   /** Le compte connecté a-t-il ce droit ? Sert à masquer ce qui serait refusé. */
   can: (permission: Permission) => boolean;
   currency: Currency;

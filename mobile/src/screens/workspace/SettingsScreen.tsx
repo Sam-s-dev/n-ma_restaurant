@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
+import { InstallAppCard } from '../../components/InstallAppCard';
 import { Icon } from '../../components/Icon';
-import { Segmented } from '../../components/workspace/Chips';
+import { Chips, Segmented } from '../../components/workspace/Chips';
 import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
-import { Field } from '../../components/workspace/Field';
+import { AmountField, Field } from '../../components/workspace/Field';
 import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
 import { PhotoField } from '../../components/workspace/PhotoField';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
@@ -23,7 +24,10 @@ import {
 import type { Member, RestaurantSettings } from '../../api/workspace/settings';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLES, roleOf } from '../../api/permissions';
 import type { Role } from '../../api/permissions';
-import { formatFullDate } from '../../utils/date';
+import { createEmployee, listEmployees } from '../../api/workspace/staff';
+import type { Employee } from '../../api/workspace/staff';
+import { formatFullDate, todayISO } from '../../utils/date';
+import { parseAmount } from '../../utils/money';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { radius, screenPadding, spacing } from '../../theme/layout';
@@ -223,7 +227,7 @@ export function SettingsScreen() {
                   iconColor={colors.iconBlue}
                   iconBackground={colors.pastelBlue}
                   title={member.fullName}
-                  subtitle={member.email}
+                  subtitle={`${member.email} · ${member.employee?.position ?? 'Sans fiche employé'}`}
                   badge={
                     <View style={[styles.roleBadge, member.role === 'manager' && styles.roleBadgeManager]}>
                       <Text
@@ -239,7 +243,9 @@ export function SettingsScreen() {
                   value={member.isActive ? 'Actif' : 'Suspendu'}
                   valueTone={member.isActive ? 'positive' : 'muted'}
                   onPress={
-                    member.id === profile.user.id || member.isOwner
+                    // Son propre compte et celui du créateur ne s'ouvrent que pour
+                    // être rattachés à une fiche employé.
+                    (member.id === profile.user.id || member.isOwner) && member.employee
                       ? undefined
                       : () => setMemberActions(member)
                   }
@@ -278,6 +284,8 @@ export function SettingsScreen() {
             onPress={() => setLogoutOpen(true)}
           />
         </Card>
+
+        <InstallAppCard />
 
         <Text style={styles.version}>N’ma Restaurant · version 1.0.0</Text>
       </ScrollView>
@@ -319,6 +327,9 @@ export function SettingsScreen() {
         subtitle={memberActions?.email}
         onClose={() => setMemberActions(null)}
         actions={
+          memberActions && (memberActions.id === profile.user.id || memberActions.isOwner) ? (
+            <Button label="Fermer" onPress={() => setMemberActions(null)} variant="secondary" />
+          ) : (
           <>
             <Button
               label={memberActions?.isActive ? 'Suspendre l’accès' : 'Rétablir l’accès'}
@@ -340,9 +351,21 @@ export function SettingsScreen() {
               variant="ghost"
             />
           </>
+          )
         }
       >
-        {memberActions && (
+        {memberActions && !memberActions.employee && (
+          <LinkEmployeeBlock
+            member={memberActions}
+            onLinked={() => {
+              setMemberActions(null);
+              notify('Compte rattaché à sa fiche employé');
+              void load();
+            }}
+          />
+        )}
+
+        {memberActions && memberActions.id !== profile.user.id && !memberActions.isOwner && (
           <View style={styles.roleBlock}>
             <Text style={styles.blockLabel}>Rôle</Text>
             <Segmented
@@ -357,11 +380,13 @@ export function SettingsScreen() {
           </View>
         )}
 
-        <Text style={styles.memberActionsText}>
-          {memberActions?.isActive
-            ? 'Suspendre coupe l’accès immédiatement, sans supprimer le compte : les ventes et dépenses qu’il a saisies gardent son nom.'
-            : 'Cette personne ne peut plus se connecter. Rétablir son accès la remet en service.'}
-        </Text>
+        {memberActions && memberActions.id !== profile.user.id && !memberActions.isOwner && (
+          <Text style={styles.memberActionsText}>
+            {memberActions.isActive
+              ? 'Suspendre coupe l’accès immédiatement, sans supprimer le compte : les ventes et dépenses qu’il a saisies gardent son nom.'
+              : 'Cette personne ne peut plus se connecter. Rétablir son accès la remet en service.'}
+          </Text>
+        )}
       </Sheet>
 
       <ConfirmSheet
@@ -597,8 +622,18 @@ interface MemberSheetProps {
  * téléphone, sache ouvrir un lien et termine la démarche — trois occasions
  * d'échouer pour un serveur qu'on inscrit en deux minutes derrière le
  * comptoir.
+ *
+ * Tout compte est aussi un employé : on choisit une fiche du Personnel qui
+ * n'a pas encore d'accès, ou on la crée ici même (poste, salaire, embauche).
  */
 function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
+  const { currency } = useWorkspace();
+  const [source, setSource] = useState<'new' | 'existing'>('new');
+  const [candidates, setCandidates] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [position, setPosition] = useState('');
+  const [salary, setSalary] = useState('');
+  const [hireDate, setHireDate] = useState(todayISO());
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -607,6 +642,9 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
   // Le rôle le plus courant pour un nouveau venu, et le moins risqué.
   const [role, setRole] = useState<Role>('cashier');
   const [errors, setErrors] = useState<{
+    employee?: string;
+    position?: string;
+    hireDate?: string;
     fullName?: string;
     email?: string;
     password?: string;
@@ -617,6 +655,11 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
 
   useEffect(() => {
     if (!visible) return;
+    setSource('new');
+    setEmployeeId(null);
+    setPosition('');
+    setSalary('');
+    setHireDate(todayISO());
     setFullName('');
     setEmail('');
     setPhone('');
@@ -625,10 +668,28 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
     setRole('cashier');
     setErrors({});
     setError(null);
+    listEmployees({ withoutAccount: true })
+      .then(setCandidates)
+      .catch(() => undefined);
   }, [visible]);
+
+  function pickEmployee(id: string) {
+    const employee = candidates.find((item) => item.id === id);
+    setEmployeeId(id);
+    if (employee) {
+      setFullName(employee.fullName);
+      setPhone(employee.phone ?? '');
+    }
+    setErrors((prev) => ({ ...prev, employee: undefined, fullName: undefined }));
+  }
 
   async function submit() {
     const next: typeof errors = {};
+    if (source === 'existing' && !employeeId) next.employee = 'Choisissez l’employé.';
+    if (source === 'new') {
+      if (position.trim().length < 2) next.position = 'Indiquez son poste.';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(hireDate)) next.hireDate = 'Date attendue au format AAAA-MM-JJ.';
+    }
     if (fullName.trim().length < 2) next.fullName = 'Indiquez le nom complet.';
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) next.email = 'Adresse e-mail invalide.';
     if (password.length < 8) next.password = 'Au moins 8 caractères.';
@@ -646,6 +707,15 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
         password,
         phone: phone.trim() === '' ? null : phone.trim(),
         role,
+        ...(source === 'existing' && employeeId
+          ? { employeeId }
+          : {
+              employee: {
+                position: position.trim(),
+                monthlySalary: parseAmount(salary) ?? 0,
+                hireDate,
+              },
+            }),
       });
       onDone(`Compte ${ROLE_LABELS[role].toLowerCase()} créé pour ${fullName.trim()}`);
     } catch (cause) {
@@ -673,6 +743,73 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
         />
         <Text style={styles.roleHint}>{ROLE_DESCRIPTIONS[role]}</Text>
       </View>
+
+      {/* --- Fiche employé : existante ou nouvelle --------------------- */}
+      <View style={styles.roleBlock}>
+        <Text style={styles.blockLabel}>Fiche employé</Text>
+        <Segmented
+          options={[
+            { value: 'new', label: 'Nouvel employé' },
+            { value: 'existing', label: 'Déjà au personnel' },
+          ]}
+          value={source}
+          onChange={(value) => {
+            setSource(value);
+            setErrors({});
+          }}
+        />
+      </View>
+
+      {source === 'existing' ? (
+        <View style={styles.roleBlock}>
+          {candidates.length === 0 ? (
+            <Text style={styles.roleHint}>
+              Tous vos employés ont déjà un accès, ou aucun n’est encore enregistré dans Personnel.
+            </Text>
+          ) : (
+            <Chips
+              options={candidates.map((item) => ({
+                value: item.id,
+                label: `${item.fullName} · ${item.position}`,
+              }))}
+              value={employeeId ?? ''}
+              onChange={pickEmployee}
+            />
+          )}
+          {Boolean(errors.employee) && <Text style={styles.fieldError}>{errors.employee}</Text>}
+        </View>
+      ) : (
+        <>
+          <Field
+            label="Poste"
+            value={position}
+            onChangeText={(value) => {
+              setPosition(value);
+              if (errors.position) setErrors((prev) => ({ ...prev, position: undefined }));
+            }}
+            placeholder="Caissière"
+            error={errors.position}
+          />
+          <AmountField
+            label="Salaire mensuel"
+            value={salary}
+            onChangeText={setSalary}
+            placeholder="0"
+            suffix={currency.symbol}
+          />
+          <Field
+            label="Date d’embauche"
+            value={hireDate}
+            onChangeText={(value) => {
+              setHireDate(value);
+              if (errors.hireDate) setErrors((prev) => ({ ...prev, hireDate: undefined }));
+            }}
+            placeholder={todayISO()}
+            error={errors.hireDate}
+            hint="Format AAAA-MM-JJ. Sert au calcul du salaire dû."
+          />
+        </>
+      )}
 
       <Field
         label="Nom complet"
@@ -733,6 +870,93 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
         error={errors.confirm}
       />
     </Sheet>
+  );
+}
+
+/**
+ * Compte créé avant que le lien avec le Personnel ne soit obligatoire : on
+ * le rattache à une fiche existante, ou on lui en crée une.
+ */
+function LinkEmployeeBlock({ member, onLinked }: { member: Member; onLinked: () => void }) {
+  const [candidates, setCandidates] = useState<Employee[]>([]);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listEmployees({ withoutAccount: true })
+      .then((items) => {
+        setCandidates(items);
+        // Même nom : c'est très probablement la bonne fiche.
+        const same = items.find(
+          (item) => item.fullName.trim().toLowerCase() === member.fullName.trim().toLowerCase(),
+        );
+        if (same) setChoice(same.id);
+      })
+      .catch(() => undefined);
+  }, [member]);
+
+  async function link(employeeId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await updateMember(member.id, { employeeId });
+      onLinked();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Rattachement impossible.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createSheet() {
+    setBusy(true);
+    setError(null);
+    try {
+      const employee = await createEmployee({
+        fullName: member.fullName,
+        position: ROLE_LABELS[member.role],
+        hireDate: member.createdAt.slice(0, 10),
+        phone: member.phone,
+      });
+      await link(employee.id);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Création de la fiche impossible.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.linkBlock}>
+      <Text style={styles.blockLabel}>Fiche employé</Text>
+      <Text style={styles.roleHint}>
+        Ce compte n’est rattaché à aucun employé : ni salaire ni pointage ne le suivent.
+      </Text>
+      {candidates.length > 0 && (
+        <View style={styles.linkChoices}>
+          <Chips
+            options={candidates.map((item) => ({
+              value: item.id,
+              label: `${item.fullName} · ${item.position}`,
+            }))}
+            value={choice ?? ''}
+            onChange={setChoice}
+          />
+        </View>
+      )}
+      {Boolean(error) && <Text style={styles.fieldError}>{error}</Text>}
+      <View style={styles.linkActions}>
+        {choice && (
+          <Button label="Rattacher à cette fiche" onPress={() => void link(choice)} loading={busy} />
+        )}
+        <Button
+          label="Créer sa fiche employé"
+          onPress={() => void createSheet()}
+          loading={busy && !choice}
+          variant="secondary"
+        />
+      </View>
+    </View>
   );
 }
 
@@ -839,6 +1063,24 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     color: colors.textSecondary,
     marginBottom: spacing.sm,
+  },
+  fieldError: {
+    ...typography.small,
+    color: colors.danger,
+    marginTop: spacing.xs,
+  },
+  linkBlock: {
+    marginBottom: spacing.xl,
+    paddingBottom: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  linkChoices: {
+    marginTop: spacing.md,
+  },
+  linkActions: {
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
   roleHint: {
     ...typography.small,

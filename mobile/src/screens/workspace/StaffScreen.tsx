@@ -11,14 +11,17 @@ import { ErrorState, LoadingState } from '../../components/workspace/ScreenState
 import { Sheet } from '../../components/workspace/Sheet';
 import { ApiError } from '../../api/client';
 import {
+  addEmployeeNote,
   ATTENDANCE_LABELS,
   createEmployee,
   deleteEmployee,
   fetchSalaryDetail,
   fetchSalaryOverview,
   listAttendances,
+  listEmployeeActivity,
   listEmployees,
   markAttendances,
+  NOTE_LABELS,
   paySalary,
   updateEmployee,
 } from '../../api/workspace/staff';
@@ -26,10 +29,14 @@ import type {
   Attendance,
   AttendanceStatus,
   Employee,
+  EmployeeActivity,
+  NoteKind,
   SalaryBalance,
   SalaryOverview,
   SalaryPayment,
 } from '../../api/workspace/staff';
+import { ROLE_LABELS } from '../../api/permissions';
+import type { Role } from '../../api/permissions';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import { parseAmount } from '../../utils/money';
 import { currentMonthISO, formatDateTime, formatFullDate, formatMonth, todayISO } from '../../utils/date';
@@ -40,6 +47,7 @@ import { useWorkspace } from './WorkspaceContext';
 
 const ATTENDANCE_TONES: Record<AttendanceStatus, { background: string; color: string }> = {
   present: { background: colors.successSoft, color: colors.success },
+  late: { background: colors.pastelPurple, color: colors.iconPurple },
   absent: { background: colors.dangerSoft, color: colors.danger },
   leave: { background: colors.warningSoft, color: colors.warning },
 };
@@ -195,6 +203,15 @@ export function StaffScreen() {
                       iconBackground={colors.pastelBlue}
                       title={employee.fullName}
                       subtitle={`${employee.position} · ${money(employee.monthlySalary)}/mois`}
+                      badge={
+                        employee.account ? (
+                          <View style={styles.accessBadge}>
+                            <Text style={styles.accessBadgeText}>
+                              {ROLE_LABELS[employee.account.role as Role] ?? 'Accès'}
+                            </Text>
+                          </View>
+                        ) : undefined
+                      }
                       value={money(employee.salary?.balanceDue ?? 0)}
                       valueTone={(employee.salary?.balanceDue ?? 0) > 0 ? 'negative' : 'positive'}
                       valueCaption="à payer"
@@ -267,6 +284,8 @@ interface AttendanceBoardProps {
 function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
   const today = todayISO();
   const [statuses, setStatuses] = useState<Record<string, AttendanceStatus>>({});
+  /** Heure d'arrivée saisie pour un retard (« 09:40 »). */
+  const [arrivals, setArrivals] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Attendance[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -281,6 +300,13 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
           AttendanceStatus
         >,
       );
+      setArrivals(
+        Object.fromEntries(
+          items
+            .filter((item) => item.arrivalTime)
+            .map((item) => [item.employeeId, item.arrivalTime as string]),
+        ),
+      );
     } catch {
       // Le pointage reste saisissable même si la lecture échoue.
     }
@@ -291,9 +317,19 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
   }, [load]);
 
   async function save() {
+    const badTime = Object.entries(statuses).find(
+      ([id, status]) =>
+        status === 'late' && arrivals[id] && !/^([01]\d|2[0-3]):[0-5]\d$/.test(arrivals[id] ?? ''),
+    );
+    if (badTime) {
+      setError('Heure d’arrivée attendue au format HH:MM, par exemple 09:40.');
+      return;
+    }
+
     const entries = Object.entries(statuses).map(([employeeId, status]) => ({
       employeeId,
       status,
+      arrivalTime: status === 'late' && arrivals[employeeId] ? arrivals[employeeId] : null,
     }));
     if (entries.length === 0) return;
 
@@ -320,7 +356,10 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
     );
   }
 
-  const presentCount = Object.values(statuses).filter((status) => status === 'present').length;
+  // Un retardataire est là : il compte parmi les présents.
+  const presentCount = Object.values(statuses).filter(
+    (status) => status === 'present' || status === 'late',
+  ).length;
 
   return (
     <View style={styles.attendance}>
@@ -351,7 +390,7 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
                 </View>
 
                 <View style={styles.attendanceButtons}>
-                  {(['present', 'absent', 'leave'] as AttendanceStatus[]).map((option) => {
+                  {(['present', 'late', 'absent', 'leave'] as AttendanceStatus[]).map((option) => {
                     const selected = status === option;
                     const tone = ATTENDANCE_TONES[option];
 
@@ -382,6 +421,25 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
                   })}
                 </View>
               </View>
+
+              {status === 'late' && (
+                <View style={styles.arrivalField}>
+                  <Field
+                    label="Heure d’arrivée"
+                    value={arrivals[employee.id] ?? ''}
+                    onChangeText={(value) =>
+                      setArrivals((current) => ({ ...current, [employee.id]: value }))
+                    }
+                    placeholder="09:40"
+                    keyboardType="numbers-and-punctuation"
+                    hint={
+                      employee.account
+                        ? 'Il sera prévenu de son retard dans l’application.'
+                        : undefined
+                    }
+                  />
+                </View>
+              )}
             </View>
           );
         })}
@@ -563,6 +621,12 @@ function SalarySheet({ employee, onClose, onEdit, onDelete, onPaid }: SalaryShee
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [activity, setActivity] = useState<EmployeeActivity[]>([]);
+  const [noteKind, setNoteKind] = useState<NoteKind>('note');
+  const [noteText, setNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | undefined>();
+
   useEffect(() => {
     if (!employee) return;
     setAmount('');
@@ -572,6 +636,10 @@ function SalarySheet({ employee, onClose, onEdit, onDelete, onPaid }: SalaryShee
     setError(null);
     setBalance(employee.salary ?? null);
     setPayments([]);
+    setActivity([]);
+    setNoteKind('note');
+    setNoteText('');
+    setNoteError(undefined);
 
     fetchSalaryDetail(employee.id)
       .then((detail) => {
@@ -579,7 +647,29 @@ function SalarySheet({ employee, onClose, onEdit, onDelete, onPaid }: SalaryShee
         setPayments(detail.payments);
       })
       .catch(() => undefined);
+    listEmployeeActivity(employee.id)
+      .then(setActivity)
+      .catch(() => undefined);
   }, [employee]);
+
+  async function addNote() {
+    if (!employee) return;
+    if (noteText.trim().length === 0) {
+      setNoteError('Décrivez ce qui s’est passé.');
+      return;
+    }
+    setNoteSaving(true);
+    setNoteError(undefined);
+    try {
+      const entry = await addEmployeeNote(employee.id, { kind: noteKind, note: noteText.trim() });
+      setActivity((current) => [entry, ...current]);
+      setNoteText('');
+    } catch (cause) {
+      setNoteError(cause instanceof ApiError ? cause.message : 'Enregistrement impossible.');
+    } finally {
+      setNoteSaving(false);
+    }
+  }
 
   async function submit() {
     if (!employee) return;
@@ -701,8 +791,84 @@ function SalarySheet({ employee, onClose, onEdit, onDelete, onPaid }: SalaryShee
           ))}
         </>
       )}
+
+      {/* --- Activités : retards, absences, avertissements… ------------- */}
+      <View style={styles.activityBlock}>
+        <SectionHeader
+          title="Activités"
+          caption={
+            employee?.account
+              ? `Accès ${ROLE_LABELS[employee.account.role as Role] ?? ''} · prévenu de chaque note`
+              : 'Sans accès à l’application'
+          }
+        />
+        <View style={styles.spaced}>
+          <Chips
+            options={(Object.keys(NOTE_LABELS) as NoteKind[]).map((kind) => ({
+              value: kind,
+              label: NOTE_LABELS[kind],
+            }))}
+            value={noteKind}
+            onChange={setNoteKind}
+          />
+        </View>
+        <Field
+          label="Ce qui s’est passé"
+          value={noteText}
+          onChangeText={(value) => {
+            setNoteText(value);
+            if (noteError) setNoteError(undefined);
+          }}
+          placeholder="Arrivé à 10 h sans prévenir"
+          multiline
+          error={noteError}
+        />
+        <Button
+          label="Ajouter à la fiche"
+          onPress={() => void addNote()}
+          loading={noteSaving}
+          variant="secondary"
+        />
+
+        {activity.map((entry, index) => (
+          <View key={`${entry.source}-${entry.id}`}>
+            {index === 0 ? <View style={styles.activityGap} /> : <RowDivider />}
+            <ListRow
+              icon={entry.kind === 'praise' ? 'check' : entry.kind === 'note' ? 'edit' : 'alert'}
+              iconColor={activityTone(entry.kind).color}
+              iconBackground={activityTone(entry.kind).background}
+              title={activityTitle(entry)}
+              subtitle={[entry.note, entry.createdByName ? `par ${entry.createdByName}` : null]
+                .filter(Boolean)
+                .join(' · ')}
+              subtitleLines={3}
+              value={formatFullDate(entry.day)}
+              valueTone="muted"
+            />
+          </View>
+        ))}
+      </View>
     </Sheet>
   );
+}
+
+function activityTitle(entry: EmployeeActivity): string {
+  if (entry.source === 'attendance') {
+    const label = ATTENDANCE_LABELS[entry.kind as AttendanceStatus] ?? entry.kind;
+    return entry.arrivalTime ? `${label} · arrivé à ${entry.arrivalTime}` : `${label} (pointage)`;
+  }
+  return NOTE_LABELS[entry.kind as NoteKind] ?? entry.kind;
+}
+
+function activityTone(kind: string): { color: string; background: string } {
+  if (kind === 'praise') return { color: colors.iconGreen, background: colors.pastelGreen };
+  if (kind === 'note' || kind === 'leave') {
+    return { color: colors.textSecondary, background: colors.backgroundAlt };
+  }
+  if (kind === 'warning' || kind === 'absent' || kind === 'absence') {
+    return { color: colors.iconRed, background: colors.pastelRed };
+  }
+  return { color: colors.iconPurple, background: colors.pastelPurple };
 }
 
 function BalanceItem({ label, value, tone }: { label: string; value: string; tone?: string }) {
@@ -728,6 +894,28 @@ function initialsOf(name: string): string {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  accessBadge: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  accessBadgeText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 10,
+    lineHeight: 14,
+    color: colors.primary,
+  },
+  arrivalField: {
+    paddingLeft: 44,
+    paddingBottom: spacing.sm,
+  },
+  activityBlock: {
+    marginTop: spacing.xl,
+  },
+  activityGap: {
+    height: spacing.md,
   },
   content: {
     paddingHorizontal: screenPadding,

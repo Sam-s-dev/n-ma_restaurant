@@ -24,6 +24,10 @@ staffRouter.delete('/:id', audited('employee.deleted'), asyncHandler(controller.
 staffRouter.get('/:id/attendances', asyncHandler(controller.employeeAttendances));
 staffRouter.post('/:id/attendances', asyncHandler(controller.markAttendance));
 
+// Activités : retards, absences, avertissements, félicitations, notes
+staffRouter.get('/:id/activity', asyncHandler(controller.listActivity));
+staffRouter.post('/:id/notes', audited('employee.noted'), asyncHandler(controller.addNote));
+
 // Salaire : solde, historique, paiement (§4, §10)
 staffRouter.get('/:id/salary', asyncHandler(controller.salaryDetail));
 staffRouter.post('/:id/salary/payments', audited('salary.paid'), asyncHandler(controller.paySalary));

@@ -9,7 +9,13 @@ export const cashRouter = Router();
 const view = requirePermission('cash.view');
 const manage = requirePermission('cash.manage');
 
-cashRouter.get('/balance', view, asyncHandler(controller.getBalance));
+// Le solde seul est ouvert au magasinier : il calibre ses demandes d'achat
+// sans voir le détail des mouvements.
+cashRouter.get(
+  '/balance',
+  requirePermission('cash.view', 'cash.balance'),
+  asyncHandler(controller.getBalance),
+);
 cashRouter.get('/movements', view, asyncHandler(controller.listMovements));
 cashRouter.get('/breakdown', view, asyncHandler(controller.breakdown));
 cashRouter.post('/adjustments', manage, audited('cash.adjusted'), asyncHandler(controller.adjust));

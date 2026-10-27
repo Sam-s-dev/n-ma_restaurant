@@ -106,7 +106,9 @@ const WAKE_UP_TIMEOUT_MS = 60_000;
  * réveiller. La connexion qui suit répond alors immédiatement.
  */
 export function warmUpServer(): void {
-  fetch(`${API_URL}/health`).catch(() => undefined);
+  // La racine plutôt que /health : réveiller l'API suffit, inutile de
+  // solliciter la base pour rien.
+  fetch(`${API_URL}/`).catch(() => undefined);
 }
 
 interface RequestOptions {
@@ -115,9 +117,31 @@ interface RequestOptions {
   token?: string;
   /** Coupe la requête si le serveur ne répond pas du tout. */
   timeoutMs?: number;
+  /**
+   * Retente une fois si le serveur n'a pas répondu. Vrai par défaut pour une
+   * lecture ; une écriture ne le demande que si la rejouer est sans danger
+   * (connexion). Une vente, elle, ne doit jamais être envoyée deux fois : le
+   * serveur a pu l'enregistrer sans que la réponse revienne.
+   */
+  retry?: boolean;
 }
 
+/**
+ * Un réveil de Render dépasse parfois la minute. Plutôt que d'afficher
+ * « le serveur ne répond pas » au moment où il finit de démarrer, on
+ * renvoie la requête une fois : la seconde trouve l'instance réveillée.
+ */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { retry = (options.method ?? 'GET') === 'GET', ...rest } = options;
+  try {
+    return await send<T>(path, rest);
+  } catch (error) {
+    if (!retry || !(error instanceof ApiError) || error.code !== 'NETWORK') throw error;
+    return send<T>(path, rest);
+  }
+}
+
+async function send<T>(path: string, options: Omit<RequestOptions, 'retry'>): Promise<T> {
   const { method = 'GET', body, token, timeoutMs = WAKE_UP_TIMEOUT_MS } = options;
 
   const controller = new AbortController();

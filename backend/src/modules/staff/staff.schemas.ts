@@ -24,25 +24,54 @@ export const updateEmployeeSchema = createEmployeeSchema.partial().extend({
   endDate: isoDate.nullable().optional(),
 });
 
-/** §4 — pointage : présent / absent par jour. */
-export const markAttendanceSchema = z.object({
-  day: isoDate,
-  status: z.enum(['present', 'absent', 'leave']),
+export const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'leave'] as const;
+
+const arrivalTime = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Heure attendue au format HH:MM.')
+  .nullable()
+  .optional();
+
+const attendanceEntry = {
+  status: z.enum(ATTENDANCE_STATUSES),
+  /** Heure d'arrivée, utile surtout pour un retard. */
+  arrivalTime,
   note: z.string().trim().max(255).nullable().optional(),
-});
+};
+
+const arrivalMatchesStatus = (data: { status: string; arrivalTime?: string | null }) =>
+  !data.arrivalTime || data.status === 'present' || data.status === 'late';
+
+/** §4 — pointage : présent, en retard, absent ou en congé, par jour. */
+export const markAttendanceSchema = z
+  .object({ day: isoDate, ...attendanceEntry })
+  .refine(arrivalMatchesStatus, {
+    message: 'Une heure d’arrivée n’a de sens que pour une présence ou un retard.',
+    path: ['arrivalTime'],
+  });
 
 export const bulkAttendanceSchema = z.object({
   day: isoDate,
   entries: z
     .array(
-      z.object({
-        employeeId: z.string().uuid(),
-        status: z.enum(['present', 'absent', 'leave']),
-        note: z.string().trim().max(255).nullable().optional(),
-      }),
+      z
+        .object({ employeeId: z.string().uuid(), ...attendanceEntry })
+        .refine(arrivalMatchesStatus, {
+          message: 'Une heure d’arrivée n’a de sens que pour une présence ou un retard.',
+          path: ['arrivalTime'],
+        }),
     )
     .min(1)
     .max(200),
+});
+
+export const NOTE_KINDS = ['late', 'absence', 'warning', 'praise', 'note'] as const;
+
+/** Activité notée sur la fiche d'un employé : retard, avertissement… */
+export const createEmployeeNoteSchema = z.object({
+  kind: z.enum(NOTE_KINDS),
+  note: z.string().trim().min(1, 'Décrivez ce qui s’est passé.').max(1000),
+  occurredOn: isoDate.optional(),
 });
 
 export const attendanceRangeSchema = z.object({
@@ -67,6 +96,11 @@ export const listEmployeesSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default(false),
+  /** Employés sans compte : ceux à qui l'on peut en créer un. */
+  withoutAccount: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default(false),
 });
 
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
@@ -74,4 +108,5 @@ export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
 export type MarkAttendanceInput = z.infer<typeof markAttendanceSchema>;
 export type BulkAttendanceInput = z.infer<typeof bulkAttendanceSchema>;
 export type PaySalaryInput = z.infer<typeof paySalarySchema>;
+export type CreateEmployeeNoteInput = z.infer<typeof createEmployeeNoteSchema>;
 export type ListEmployeesInput = z.infer<typeof listEmployeesSchema>;

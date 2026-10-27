@@ -3,6 +3,7 @@ import { buildUpdate } from '../../core/sqlBuilder';
 import { query, queryOne } from '../../db/pool';
 import { withTransaction, type Tx } from '../../db/transaction';
 import { round2, round3 } from '../../utils/money';
+import { notify } from '../notifications/notifications.service';
 import type {
   AdjustStockInput,
   CreateStockItemInput,
@@ -170,8 +171,13 @@ export async function applyStockChange(
     createdBy?: string | null;
   },
 ): Promise<{ quantityAfter: number; name: string; unit: string }> {
-  const current = await tx.queryOne<{ quantity: number; name: string; unit: string }>(
-    `SELECT quantity, name, unit FROM stock_items
+  const current = await tx.queryOne<{
+    quantity: number;
+    name: string;
+    unit: string;
+    alert_threshold: number;
+  }>(
+    `SELECT quantity, name, unit, alert_threshold FROM stock_items
       WHERE id = $1 AND restaurant_id = $2 FOR UPDATE`,
     [params.stockItemId, params.restaurantId],
   );
@@ -220,6 +226,27 @@ export async function applyStockChange(
       params.createdBy ?? null,
     ],
   );
+
+  // Alerte au moment où le seuil est franchi, pas à chaque sortie suivante :
+  // sinon le magasinier recevrait la même alerte dix fois dans la journée.
+  const crossedThreshold =
+    current.alert_threshold > 0 &&
+    current.quantity > current.alert_threshold &&
+    quantityAfter <= current.alert_threshold;
+  if (crossedThreshold) {
+    await notify(
+      {
+        restaurantId: params.restaurantId,
+        to: { permission: 'stock.view' },
+        kind: 'stock.low',
+        title: 'Stock bas',
+        body: `Il reste ${quantityAfter} ${current.unit} de ${current.name} (seuil : ${current.alert_threshold}).`,
+        route: 'stock',
+        entityId: params.stockItemId,
+      },
+      tx,
+    );
+  }
 
   return { quantityAfter, name: current.name, unit: current.unit };
 }
