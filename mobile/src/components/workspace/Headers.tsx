@@ -7,8 +7,11 @@ import { radius, spacing } from '../../theme/layout';
 interface WorkspaceHeaderProps {
   restaurantName: string;
   greeting: string;
-  /** Solde de caisse, affiché en permanence comme le demande le §7. */
-  balance: string;
+  /**
+   * Solde de caisse, affiché en permanence comme le demande le §7 — sauf
+   * pour les rôles qui n'ont pas à le connaître.
+   */
+  balance?: string;
   /** Logo du restaurant, quand il en a chargé un (§3). */
   logoUri?: string | null;
   onPressAccount: () => void;
@@ -61,12 +64,14 @@ export function WorkspaceHeader({
         </Text>
       </View>
 
-      <View style={styles.balance}>
-        <Text style={styles.balanceLabel}>En caisse</Text>
-        <Text style={styles.balanceValue} numberOfLines={1}>
-          {balance}
-        </Text>
-      </View>
+      {balance !== undefined && (
+        <View style={styles.balance}>
+          <Text style={styles.balanceLabel}>En caisse</Text>
+          <Text style={styles.balanceValue} numberOfLines={1}>
+            {balance}
+          </Text>
+        </View>
+      )}
 
       {/* Déconnexion à portée de pouce : plusieurs personnes se relaient
           sur le même téléphone en salle. */}

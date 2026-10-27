@@ -223,6 +223,12 @@ async function main(): Promise<void> {
     body: { email: managerEmail, password: managerPassword },
   });
   check('connexion du gérant réussie', login.status === 200, login.body);
+  check('le créateur de l’espace est gérant', login.body?.profile?.user?.role === 'manager');
+  check(
+    'le profil liste ses droits, journal compris',
+    login.body?.profile?.user?.permissions?.includes('audit.view'),
+    login.body?.profile?.user?.permissions,
+  );
   const token: string = login.body?.accessToken;
   const refreshToken: string = login.body?.refreshToken;
 
@@ -829,9 +835,15 @@ async function main(): Promise<void> {
 
   const tooShort = await call('POST', '/api/users', {
     token,
-    body: { fullName: 'Fatou Collègue', email: colleagueEmail, password: 'court' },
+    body: { fullName: 'Fatou Collègue', email: colleagueEmail, password: 'court', role: 'manager' },
   });
   check('mot de passe trop court refusé (400)', tooShort.status === 400, tooShort.body);
+
+  const noRole = await call('POST', '/api/users', {
+    token,
+    body: { fullName: 'Fatou Collègue', email: colleagueEmail, password: colleaguePassword },
+  });
+  check('création sans rôle refusée (400)', noRole.status === 400, noRole.body);
 
   const created = await call('POST', '/api/users', {
     token,
@@ -840,15 +852,17 @@ async function main(): Promise<void> {
       email: colleagueEmail,
       password: colleaguePassword,
       phone: '620 33 44 55',
+      role: 'manager',
     },
   });
   check('compte du collègue créé (201)', created.status === 201, created.body);
   check('il n’est pas propriétaire', created.body?.isOwner === false, created.body);
+  check('il a le rôle demandé', created.body?.role === 'manager', created.body);
   check('il est actif d’emblée', created.body?.isActive === true, created.body);
 
   const duplicate = await call('POST', '/api/users', {
     token,
-    body: { fullName: 'Doublon', email: colleagueEmail, password: colleaguePassword },
+    body: { fullName: 'Doublon', email: colleagueEmail, password: colleaguePassword, role: 'cashier' },
   });
   check('adresse déjà utilisée refusée (409)', duplicate.status === 409, duplicate.body);
 
@@ -869,7 +883,7 @@ async function main(): Promise<void> {
   const colleagueToken: string = colleagueLogin.body?.accessToken;
   const colleagueBalance = await call('GET', '/api/cash/balance', { token: colleagueToken });
   check(
-    'le collègue a les mêmes droits (accès caisse)',
+    'un second gérant a accès à la caisse',
     colleagueBalance.body?.balance === CAPITAL - 30000,
     colleagueBalance.body,
   );
@@ -881,6 +895,7 @@ async function main(): Promise<void> {
       fullName: 'Compte Éphémère',
       email: `ephemere.${stamp}@exemple.com`,
       password: colleaguePassword,
+      role: 'cashier',
     },
   });
   const removed = await call('DELETE', `/api/users/${spare.body?.id}`, { token });
@@ -905,6 +920,200 @@ async function main(): Promise<void> {
     'on ne peut pas supprimer son propre compte (400)',
     selfRemoval.status === 400,
     selfRemoval.body,
+  );
+
+  // ---------------------------------------------------------------------
+  section('16 bis. Rôles : caissier et magasinier');
+
+  async function member(role: string, name: string): Promise<{ id: string; token: string }> {
+    const email = `${role}.${stamp}@exemple.com`;
+    const account = await call('POST', '/api/users', {
+      token,
+      body: { fullName: name, email, password: colleaguePassword, role },
+    });
+    const session = await call('POST', '/api/auth/login', {
+      body: { email, password: colleaguePassword },
+    });
+    return { id: account.body?.id, token: session.body?.accessToken };
+  }
+
+  const cashier = await member('cashier', 'Mamadou Caissier');
+  const storekeeper = await member('storekeeper', 'Aïssatou Magasin');
+  check('comptes caissier et magasinier créés', Boolean(cashier.token && storekeeper.token));
+
+  const cashierProfile = await call('GET', '/api/auth/me', { token: cashier.token });
+  check(
+    'le profil du caissier ne contient pas l’annulation de vente',
+    cashierProfile.body?.user?.role === 'cashier' &&
+      !cashierProfile.body?.user?.permissions?.includes('sales.cancel'),
+    cashierProfile.body?.user,
+  );
+
+  // Ce que le caissier peut faire.
+  const cashierSale = await call('POST', '/api/sales', {
+    token: cashier.token,
+    body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  check('le caissier encaisse une vente (201)', cashierSale.status === 201, cashierSale.body);
+
+  const ownSales = await call('GET', '/api/sales', { token: cashier.token });
+  check(
+    'il ne voit que ses propres ventes',
+    ownSales.body?.items?.length === 1 && ownSales.body.items[0].id === cashierSale.body?.id,
+    ownSales.body?.items?.length,
+  );
+  const ownReceipt = await call('GET', `/api/sales/${cashierSale.body?.id}/receipt`, {
+    token: cashier.token,
+  });
+  check('il réimprime son ticket', ownReceipt.status === 200, ownReceipt.status);
+
+  const managerSales = await call('GET', '/api/sales?limit=5', { token });
+  const someoneElsesSale = managerSales.body?.items?.find(
+    (sale: any) => sale.id !== cashierSale.body?.id,
+  );
+  const peek = await call('GET', `/api/sales/${someoneElsesSale?.id}`, { token: cashier.token });
+  check('la vente d’un collègue lui reste invisible (404)', peek.status === 404, peek.status);
+
+  const soldOut = await call('PATCH', `/api/menu/dishes/${dishId}/availability`, {
+    token: cashier.token,
+    body: { isAvailable: true },
+  });
+  check('il signale la disponibilité d’un plat', soldOut.status === 200, soldOut.body);
+
+  // Ce qu'il ne peut pas faire.
+  const denied = async (label: string, method: string, path: string, body?: unknown) => {
+    const result = await call(method, path, { token: cashier.token, body });
+    check(`caissier : ${label} (403)`, result.status === 403, result.status);
+  };
+  await denied('annuler une vente', 'POST', `/api/sales/${cashierSale.body?.id}/cancel`, {
+    reason: 'Erreur de saisie',
+  });
+  await denied('appliquer un prix libre', 'POST', '/api/sales', {
+    items: [{ dishId, quantity: 1, unitPrice: 1 }],
+    paymentMethod: 'cash',
+  });
+  await denied('voir le solde de caisse', 'GET', '/api/cash/balance');
+  await denied('corriger la caisse', 'POST', '/api/cash/adjustments', {
+    direction: 'out',
+    amount: 1000,
+    label: 'Retrait',
+  });
+  await denied('ouvrir le tableau de bord', 'GET', '/api/dashboard/summary');
+  await denied('changer un prix', 'PATCH', `/api/menu/dishes/${dishId}`, { price: 10 });
+  await denied('voir le stock', 'GET', '/api/stock');
+  await denied('voir le personnel', 'GET', '/api/staff');
+  await denied('gérer l’équipe', 'GET', '/api/users');
+  await denied('modifier les paramètres', 'PATCH', '/api/restaurant', { name: 'Piraté' });
+  await denied('lire le journal', 'GET', '/api/audit');
+
+  // Magasinier : stock et achats de marchandise, rien d'autre.
+  const storeStock = await call('GET', '/api/stock', { token: storekeeper.token });
+  check('le magasinier consulte le stock', storeStock.status === 200, storeStock.status);
+
+  const storePurchase = await call('POST', '/api/expenses', {
+    token: storekeeper.token,
+    body: {
+      amount: 4000,
+      category: 'stock_purchase',
+      description: 'Achat de 2 kg de poulet',
+      stockItemId,
+      quantity: 2,
+    },
+  });
+  check('il enregistre un achat de stock (201)', storePurchase.status === 201, storePurchase.body);
+
+  const bill = await call('POST', '/api/expenses', {
+    token: storekeeper.token,
+    body: { amount: 1000, category: 'bill', description: 'Facture électricité' },
+  });
+  check('il ne peut pas saisir une autre dépense (403)', bill.status === 403, bill.status);
+
+  const storeExpenses = await call('GET', '/api/expenses', { token: storekeeper.token });
+  check(
+    'il ne voit que les achats de stock',
+    storeExpenses.body?.items?.every((e: any) => e.category === 'stock_purchase'),
+    storeExpenses.body?.items?.map((e: any) => e.category),
+  );
+  const storeSale = await call('POST', '/api/sales', {
+    token: storekeeper.token,
+    body: { items: [{ dishId, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  check('il ne peut pas vendre (403)', storeSale.status === 403, storeSale.status);
+
+  // Le gérant défait ce qui doit l'être : caisse et stock reviennent à l'état
+  // attendu par la suite du test.
+  const managerCancel = await call('POST', `/api/sales/${cashierSale.body?.id}/cancel`, {
+    token,
+    body: { reason: 'Vente de test du caissier' },
+  });
+  check('le gérant annule la vente du caissier', managerCancel.status === 200, managerCancel.body);
+  await call('POST', `/api/expenses/${storePurchase.body?.id}/cancel`, {
+    token,
+    body: { reason: 'Achat de test du magasinier' },
+  });
+
+  // Changement de rôle.
+  const ownerDemotion = await call('PATCH', `/api/users/${login.body?.profile?.user?.id}`, {
+    token: colleagueToken,
+    body: { role: 'cashier' },
+  });
+  check('le créateur de l’espace reste gérant (400)', ownerDemotion.status === 400, ownerDemotion.body);
+
+  const selfDemotion = await call('PATCH', `/api/users/${created.body?.id}`, {
+    token: colleagueToken,
+    body: { role: 'cashier' },
+  });
+  check('on ne change pas son propre rôle (400)', selfDemotion.status === 400, selfDemotion.body);
+
+  const promoted = await call('PATCH', `/api/users/${cashier.id}`, {
+    token,
+    body: { role: 'manager' },
+  });
+  check('le gérant promeut le caissier', promoted.body?.role === 'manager', promoted.body);
+  const afterPromotion = await call('GET', '/api/cash/balance', { token: cashier.token });
+  check(
+    'le nouveau rôle s’applique tout de suite',
+    afterPromotion.status === 200,
+    afterPromotion.status,
+  );
+
+  // Journal d'activité.
+  const journal = await call('GET', '/api/audit', { token });
+  const actions: string[] = journal.body?.items?.map((entry: any) => entry.action) ?? [];
+  check('le gérant lit le journal', journal.status === 200, journal.body);
+  check(
+    'l’annulation de vente y figure, avec son auteur et son motif',
+    journal.body?.items?.some(
+      (entry: any) =>
+        entry.action === 'sale.cancelled' &&
+        entry.userName === 'Awa Gérante' &&
+        entry.details?.reason === 'Vente de test du caissier',
+    ),
+    actions,
+  );
+  check(
+    'l’achat du magasinier y figure',
+    journal.body?.items?.some(
+      (entry: any) => entry.action === 'expense.created' && entry.userRole === 'storekeeper',
+    ),
+    actions,
+  );
+  check(
+    'le changement de rôle y figure',
+    journal.body?.items?.some(
+      (entry: any) => entry.action === 'member.updated' && entry.details?.role === 'manager',
+    ),
+    actions,
+  );
+  check(
+    'aucun mot de passe n’y est conservé',
+    !JSON.stringify(journal.body).includes(colleaguePassword),
+  );
+  check(
+    'une action refusée n’y laisse pas de trace',
+    !journal.body?.items?.some(
+      (entry: any) => entry.action === 'cash.adjusted' && entry.userRole === 'cashier',
+    ),
   );
 
   // ---------------------------------------------------------------------

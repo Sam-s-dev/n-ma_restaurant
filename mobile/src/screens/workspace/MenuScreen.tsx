@@ -39,7 +39,10 @@ import { useWorkspace } from './WorkspaceContext';
  * en un geste sans ouvrir de formulaire.
  */
 export function MenuScreen() {
-  const { money, notify } = useWorkspace();
+  const { money, notify, can } = useWorkspace();
+  // Le caissier consulte la carte et signale une rupture, sans toucher aux
+  // plats ni aux prix.
+  const canManage = can('menu.manage');
 
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
@@ -151,25 +154,27 @@ export function MenuScreen() {
           />
         </View>
 
-        <View style={styles.actions}>
-          <Pressable
-            style={styles.actionButton}
-            onPress={() => setDishSheet({ open: true, dish: null })}
-            accessibilityRole="button"
-          >
-            <Icon name="plus" size={16} color={colors.textOnPrimary} strokeWidth={2.5} />
-            <Text style={styles.actionText}>Nouveau plat</Text>
-          </Pressable>
+        {canManage && (
+          <View style={styles.actions}>
+            <Pressable
+              style={styles.actionButton}
+              onPress={() => setDishSheet({ open: true, dish: null })}
+              accessibilityRole="button"
+            >
+              <Icon name="plus" size={16} color={colors.textOnPrimary} strokeWidth={2.5} />
+              <Text style={styles.actionText}>Nouveau plat</Text>
+            </Pressable>
 
-          <Pressable
-            style={[styles.actionButton, styles.actionSecondary]}
-            onPress={() => setCategoriesOpen(true)}
-            accessibilityRole="button"
-          >
-            <Icon name="grid" size={16} color={colors.primary} strokeWidth={2.2} />
-            <Text style={[styles.actionText, styles.actionTextSecondary]}>Catégories</Text>
-          </Pressable>
-        </View>
+            <Pressable
+              style={[styles.actionButton, styles.actionSecondary]}
+              onPress={() => setCategoriesOpen(true)}
+              accessibilityRole="button"
+            >
+              <Icon name="grid" size={16} color={colors.primary} strokeWidth={2.2} />
+              <Text style={[styles.actionText, styles.actionTextSecondary]}>Catégories</Text>
+            </Pressable>
+          </View>
+        )}
 
         {visible.length === 0 ? (
           <EmptyState
@@ -181,7 +186,7 @@ export function MenuScreen() {
                 : 'Aucun plat ne correspond à votre recherche.'
             }
             action={
-              dishes.length === 0 ? (
+              dishes.length === 0 && canManage ? (
                 <Button
                   label="Ajouter un plat"
                   onPress={() => setDishSheet({ open: true, dish: null })}
@@ -197,8 +202,9 @@ export function MenuScreen() {
                 <View style={styles.dishRow}>
                   <Pressable
                     style={styles.dishMain}
-                    onPress={() => setDishSheet({ open: true, dish })}
-                    accessibilityRole="button"
+                    onPress={canManage ? () => setDishSheet({ open: true, dish }) : undefined}
+                    disabled={!canManage}
+                    accessibilityRole={canManage ? 'button' : undefined}
                   >
                     {dish.photoMediaId ? (
                       <Image

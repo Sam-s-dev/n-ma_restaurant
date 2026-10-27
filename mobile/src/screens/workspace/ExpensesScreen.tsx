@@ -45,7 +45,9 @@ const CATEGORY_ICONS: Record<ExpenseCategory, { icon: 'box' | 'users' | 'receipt
  * reste exact (§4).
  */
 export function ExpensesScreen() {
-  const { money, refreshBalance, notify } = useWorkspace();
+  const { money, refreshBalance, notify, can } = useWorkspace();
+  // Le magasinier ne voit et ne saisit que les achats de marchandise.
+  const canManage = can('expenses.manage');
 
   const [category, setCategory] = useState<'all' | ExpenseCategory>('all');
   const [page, setPage] = useState<ExpensesPage | null>(null);
@@ -139,19 +141,21 @@ export function ExpensesScreen() {
           </View>
         </Card>
 
-        <View style={styles.filters}>
-          <Chips
-            bleed={screenPadding}
-            value={category}
-            onChange={setCategory}
-            options={[
-              { value: 'all', label: 'Toutes' },
-              ...(['stock_purchase', 'salary', 'bill', 'maintenance', 'other'] as ExpenseCategory[]).map(
-                (value) => ({ value, label: EXPENSE_LABELS[value] }),
-              ),
-            ]}
-          />
-        </View>
+        {canManage && (
+          <View style={styles.filters}>
+            <Chips
+              bleed={screenPadding}
+              value={category}
+              onChange={setCategory}
+              options={[
+                { value: 'all', label: 'Toutes' },
+                ...(
+                  ['stock_purchase', 'salary', 'bill', 'maintenance', 'other'] as ExpenseCategory[]
+                ).map((value) => ({ value, label: EXPENSE_LABELS[value] })),
+              ]}
+            />
+          </View>
+        )}
 
         <Pressable
           style={styles.actionButton}
@@ -159,7 +163,7 @@ export function ExpensesScreen() {
           accessibilityRole="button"
         >
           <Icon name="plus" size={16} color={colors.textOnPrimary} strokeWidth={2.5} />
-          <Text style={styles.actionText}>Nouvelle dépense</Text>
+          <Text style={styles.actionText}>{canManage ? 'Nouvelle dépense' : 'Nouvel achat'}</Text>
         </Pressable>
 
         {expenses.length === 0 ? (
@@ -215,7 +219,7 @@ export function ExpensesScreen() {
         subtitle={detail ? `${detail.reference} · ${formatRelativeDay(detail.expenseDate)}` : undefined}
         onClose={() => setDetail(null)}
         actions={
-          detail && !detail.cancelledAt && detail.category !== 'salary' ? (
+          detail && !detail.cancelledAt && detail.category !== 'salary' && canManage ? (
             <Button
               label="Annuler cette dépense"
               onPress={() => {
@@ -291,7 +295,8 @@ interface ExpenseFormSheetProps {
 }
 
 function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
-  const { currency } = useWorkspace();
+  const { currency, can } = useWorkspace();
+  const onlyPurchases = !can('expenses.manage');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('stock_purchase');
   const [description, setDescription] = useState('');
@@ -382,7 +387,7 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
   return (
     <Sheet
       visible={visible}
-      title="Nouvelle dépense"
+      title={onlyPurchases ? 'Nouvel achat de stock' : 'Nouvelle dépense'}
       subtitle="Le montant sera retiré de la caisse"
       error={error}
       onClose={onClose}
@@ -400,14 +405,18 @@ function ExpenseFormSheet({ visible, onClose, onDone }: ExpenseFormSheetProps) {
         error={errors.amount}
       />
 
-      <Text style={styles.blockLabel}>Catégorie</Text>
-      <View style={styles.spaced}>
-        <Chips
-          options={CREATABLE_CATEGORIES.map((value) => ({ value, label: EXPENSE_LABELS[value] }))}
-          value={category}
-          onChange={setCategory}
-        />
-      </View>
+      {!onlyPurchases && (
+        <>
+          <Text style={styles.blockLabel}>Catégorie</Text>
+          <View style={styles.spaced}>
+            <Chips
+              options={CREATABLE_CATEGORIES.map((value) => ({ value, label: EXPENSE_LABELS[value] }))}
+              value={category}
+              onChange={setCategory}
+            />
+          </View>
+        </>
+      )}
 
       {isPurchase && (
         <View style={styles.purchaseBlock}>

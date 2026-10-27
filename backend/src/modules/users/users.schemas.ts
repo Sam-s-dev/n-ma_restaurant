@@ -1,7 +1,11 @@
 import { z } from 'zod';
+import { ROLES } from '../../core/permissions';
+
+const roleSchema = z.enum(ROLES, { message: 'Rôle inconnu.' });
 
 export const inviteUserSchema = z.object({
   email: z.string().trim().toLowerCase().email('Adresse e-mail invalide.'),
+  role: roleSchema.default('cashier'),
   expiresInDays: z.coerce.number().int().min(1).max(30).default(7),
 });
 
@@ -29,6 +33,8 @@ export const createMemberSchema = z.object({
     .regex(/^[0-9+\s().-]+$/, 'Numéro de téléphone invalide.')
     .nullable()
     .optional(),
+  /** Choisi explicitement : aucun rôle par défaut ne donnerait trop ou trop peu. */
+  role: roleSchema,
 });
 
 export const updateMemberSchema = z
@@ -36,6 +42,7 @@ export const updateMemberSchema = z
     fullName: z.string().trim().min(2).max(120),
     phone: z.string().trim().min(4).max(30).nullable(),
     isActive: z.boolean(),
+    role: roleSchema,
   })
   .partial();
 

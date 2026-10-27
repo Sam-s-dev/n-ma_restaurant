@@ -1,8 +1,9 @@
 import { createContext, useContext } from 'react';
 import type { Profile } from '../../api/auth';
+import type { Permission } from '../../api/permissions';
 import type { Currency } from '../../utils/money';
 
-/** Routes de l'espace restaurant : cinq onglets et six modules secondaires. */
+/** Routes de l'espace restaurant : cinq onglets et des modules secondaires. */
 export type WorkspaceRoute =
   | 'dashboard'
   | 'sales'
@@ -14,10 +15,13 @@ export type WorkspaceRoute =
   | 'staff'
   | 'credits'
   | 'customers'
-  | 'settings';
+  | 'settings'
+  | 'audit';
 
 export interface WorkspaceContextValue {
   profile: Profile;
+  /** Le compte connecté a-t-il ce droit ? Sert à masquer ce qui serait refusé. */
+  can: (permission: Permission) => boolean;
   currency: Currency;
   /** Formate un montant dans la devise du restaurant. */
   money: (value: number) => string;

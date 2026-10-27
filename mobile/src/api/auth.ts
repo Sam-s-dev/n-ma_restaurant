@@ -1,4 +1,5 @@
 import { request } from './client';
+import type { Permission, Role } from './permissions';
 
 /** Réponse de POST /api/auth/register (compte créé en attente d'activation). */
 export interface RegisterResponse {
@@ -25,6 +26,9 @@ export interface Profile {
     fullName: string;
     phone: string | null;
     isOwner: boolean;
+    /** Absents d'un profil enregistré avant l'arrivée des rôles. */
+    role?: Role;
+    permissions?: Permission[];
   };
   restaurant: {
     id: string;

@@ -14,6 +14,8 @@ import { fetchProfile } from '../../api/workspace/settings';
 import { saveProfile } from '../../api/session';
 import { mediaUrl, THUMB } from '../../api/client';
 import type { Profile } from '../../api/auth';
+import { can as profileCan } from '../../api/permissions';
+import type { Permission } from '../../api/permissions';
 import { formatMoney } from '../../utils/money';
 import type { Currency } from '../../utils/money';
 import { colors } from '../../theme/colors';
@@ -32,14 +34,14 @@ import { StaffScreen } from './StaffScreen';
 import { CreditsScreen } from './CreditsScreen';
 import { CustomersScreen } from './CustomersScreen';
 import { SettingsScreen } from './SettingsScreen';
+import { AuditScreen } from './AuditScreen';
+import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 
 interface WorkspaceScreenProps {
   profile: Profile;
   onProfileChange: (profile: Profile) => void;
   onLogout: () => void;
 }
-
-const TAB_ROUTES: WorkspaceRoute[] = ['dashboard', 'sales', 'cash', 'menu', 'more'];
 
 const TITLES: Record<WorkspaceRoute, string> = {
   dashboard: 'Tableau de bord',
@@ -53,15 +55,34 @@ const TITLES: Record<WorkspaceRoute, string> = {
   credits: 'Créances',
   customers: 'Clients',
   settings: 'Paramètres',
+  audit: 'Journal d’activité',
+};
+
+const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>, 'key'>> = {
+  dashboard: { label: 'Accueil', icon: 'home' },
+  sales: { label: 'Ventes', icon: 'bag' },
+  cash: { label: 'Caisse', icon: 'wallet' },
+  menu: { label: 'Menu', icon: 'menu-book' },
+  stock: { label: 'Stock', icon: 'box' },
+  expenses: { label: 'Achats', icon: 'receipt' },
+  credits: { label: 'Créances', icon: 'credit' },
+  customers: { label: 'Clients', icon: 'user' },
+  staff: { label: 'Personnel', icon: 'users' },
+  settings: { label: 'Compte', icon: 'settings' },
+  audit: { label: 'Journal', icon: 'clock' },
+  more: { label: 'Plus', icon: 'grid' },
 };
 
 /**
  * Coque de l'espace restaurant.
  *
  * La navigation interne est tenue par un simple état plutôt que par un
- * navigateur à onglets : cinq écrans et six modules ne justifient pas une
- * dépendance de plus, et cela laisse la main sur l'en-tête, qui doit
+ * navigateur à onglets : cinq écrans et quelques modules ne justifient pas
+ * une dépendance de plus, et cela laisse la main sur l'en-tête, qui doit
  * afficher le solde de caisse en permanence (§7).
+ *
+ * Les onglets dépendent du rôle : le caissier arrive sur l'écran de vente,
+ * le magasinier sur le stock, et aucun des deux ne voit le solde.
  */
 export function WorkspaceScreen({
   profile,
@@ -69,12 +90,20 @@ export function WorkspaceScreen({
   onLogout,
 }: WorkspaceScreenProps) {
   const insets = useSafeAreaInsets();
+  const can = useCallback(
+    (permission: Permission) => profileCan(profile, permission),
+    [profile],
+  );
+  const home = homeRouteFor(profile);
+  const tabRoutes = tabRoutesFor(profile);
+  const showsBalance = can('cash.view');
+
   /*
    * Pile de navigation plutôt qu'une simple route courante : le bouton
    * retour doit ramener là d'où l'on vient, y compris entre deux onglets.
    * L'accueil est le fond de pile — on ne recule jamais au-delà.
    */
-  const [history, setHistory] = useState<WorkspaceRoute[]>(['dashboard']);
+  const [history, setHistory] = useState<WorkspaceRoute[]>([home]);
   const [balance, setBalance] = useState(0);
   const [alerts, setAlerts] = useState({ stock: 0, credits: 0 });
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -96,13 +125,15 @@ export function WorkspaceScreen({
    * d'alerte de la barre d'onglets. Un seul appel pour les deux.
    */
   const refreshBalance = useCallback(() => {
+    // Le résumé est réservé au gérant : inutile d'essuyer un refus.
+    if (!can('dashboard.view')) return;
     fetchSummary()
       .then((summary) => {
         setBalance(summary.cash.balance);
         setAlerts({ stock: summary.stock.lowCount, credits: summary.credits.openCount });
       })
       .catch(() => undefined);
-  }, []);
+  }, [can]);
 
   useEffect(refreshBalance, [refreshBalance]);
 
@@ -120,25 +151,34 @@ export function WorkspaceScreen({
       .catch(() => undefined);
   }, [onProfileChange]);
 
-  const route = history[history.length - 1] ?? 'dashboard';
+  // Le rôle a pu changer depuis la dernière ouverture, et un profil
+  // enregistré par une version précédente n'a pas encore ses droits.
+  useEffect(reloadProfile, [reloadProfile]);
+
+  const current = history[history.length - 1] ?? home;
+  // Un écran devenu interdit (rôle modifié) ramène à l'accueil du rôle.
+  const route = canOpen(profile, current) ? current : home;
   const canGoBack = history.length > 1;
 
-  const navigate = useCallback((next: WorkspaceRoute) => {
-    setHistory((current) => {
-      if (current[current.length - 1] === next) return current;
-      // Revenir à l'accueil repart de zéro : c'est le point de départ, on
-      // n'y arrive jamais « par-dessus » un autre écran.
-      if (next === 'dashboard') return ['dashboard'];
-      // Vingt entrées suffisent largement et bornent la mémoire.
-      return [...current.slice(-19), next];
-    });
-  }, []);
+  const navigate = useCallback(
+    (next: WorkspaceRoute) => {
+      setHistory((stack) => {
+        if (stack[stack.length - 1] === next) return stack;
+        // Revenir à l'accueil repart de zéro : c'est le point de départ, on
+        // n'y arrive jamais « par-dessus » un autre écran.
+        if (next === home) return [home];
+        // Vingt entrées suffisent largement et bornent la mémoire.
+        return [...stack.slice(-19), next];
+      });
+    },
+    [home],
+  );
 
   const goBack = useCallback(() => {
     setHistory((current) => (current.length > 1 ? current.slice(0, -1) : current));
   }, []);
 
-  const isTab = TAB_ROUTES.includes(route);
+  const isTab = tabRoutes.includes(route);
 
   // Bouton retour matériel d'Android : il doit ramener aux modules, pas
   // fermer l'application depuis un écran secondaire.
@@ -154,16 +194,15 @@ export function WorkspaceScreen({
     return () => subscription.remove();
   }, [canGoBack, goBack]);
 
-  const tabs: Array<TabDefinition<WorkspaceRoute>> = [
-    { key: 'dashboard', label: 'Accueil', icon: 'home' },
-    { key: 'sales', label: 'Ventes', icon: 'bag' },
-    { key: 'cash', label: 'Caisse', icon: 'wallet' },
-    { key: 'menu', label: 'Menu', icon: 'menu-book' },
-    { key: 'more', label: 'Plus', icon: 'grid', badge: alerts.stock + alerts.credits },
-  ];
+  const tabs: Array<TabDefinition<WorkspaceRoute>> = tabRoutes.map((key) => ({
+    key,
+    ...TAB_DEFINITIONS[key],
+    ...(key === 'more' ? { badge: alerts.stock + alerts.credits } : {}),
+  }));
 
   const contextValue = {
     profile,
+    can,
     currency,
     money,
     balance,
@@ -178,11 +217,11 @@ export function WorkspaceScreen({
     <WorkspaceProvider value={contextValue}>
       <View style={styles.screen}>
         <View style={[styles.headerZone, { paddingTop: insets.top + spacing.md }]}>
-          {route === 'dashboard' ? (
+          {route === home ? (
             <WorkspaceHeader
               restaurantName={profile.restaurant.name}
               greeting={`Bonjour ${profile.user.fullName.split(' ')[0] ?? ''}`}
-              balance={money(balance)}
+              balance={showsBalance ? money(balance) : undefined}
               logoUri={mediaUrl(profile.restaurant.logoMediaId, THUMB.small)}
               onPressAccount={() => navigate('settings')}
               onLogout={() => setLogoutOpen(true)}
@@ -193,12 +232,14 @@ export function WorkspaceScreen({
               onBack={goBack}
               action={
                 <View style={styles.headerActions}>
-                  <View style={styles.balanceChip}>
-                    <Text style={styles.balanceChipLabel}>Caisse</Text>
-                    <Text style={styles.balanceChipValue} numberOfLines={1}>
-                      {money(balance)}
-                    </Text>
-                  </View>
+                  {showsBalance && (
+                    <View style={styles.balanceChip}>
+                      <Text style={styles.balanceChipLabel}>Caisse</Text>
+                      <Text style={styles.balanceChipValue} numberOfLines={1}>
+                        {money(balance)}
+                      </Text>
+                    </View>
+                  )}
                   <Pressable
                     onPress={() => setLogoutOpen(true)}
                     hitSlop={8}
@@ -261,6 +302,8 @@ function renderRoute(route: WorkspaceRoute) {
       return <CustomersScreen />;
     case 'settings':
       return <SettingsScreen />;
+    case 'audit':
+      return <AuditScreen />;
     default:
       return null;
   }

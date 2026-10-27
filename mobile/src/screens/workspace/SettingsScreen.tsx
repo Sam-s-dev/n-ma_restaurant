@@ -3,6 +3,7 @@ import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
+import { Segmented } from '../../components/workspace/Chips';
 import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
 import { Field } from '../../components/workspace/Field';
 import { ListRow, RowDivider, SectionHeader } from '../../components/workspace/ListRow';
@@ -20,6 +21,8 @@ import {
   updateSettings,
 } from '../../api/workspace/settings';
 import type { Member, RestaurantSettings } from '../../api/workspace/settings';
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLES, roleOf } from '../../api/permissions';
+import type { Role } from '../../api/permissions';
 import { formatFullDate } from '../../utils/date';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
@@ -32,9 +35,14 @@ import { useWorkspace } from './WorkspaceContext';
  * Le nom, l'adresse et le téléphone saisis ici sont ceux qui figureront en
  * tête des tickets de vente. Le logo N'ma n'apparaît nulle part dans cet
  * espace : il est réservé à la page d'accueil publique.
+ *
+ * Le caissier et le magasinier n'y trouvent que leur propre compte et les
+ * informations du restaurant, en lecture.
  */
 export function SettingsScreen() {
-  const { profile, reloadProfile, notify, logout } = useWorkspace();
+  const { profile, reloadProfile, notify, logout, can } = useWorkspace();
+  const canEditRestaurant = can('settings.manage');
+  const canManageTeam = can('team.manage');
 
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -54,7 +62,10 @@ export function SettingsScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextSettings, nextMembers] = await Promise.all([fetchSettings(), listMembers()]);
+      const [nextSettings, nextMembers] = await Promise.all([
+        fetchSettings(),
+        canManageTeam ? listMembers() : Promise.resolve([]),
+      ]);
       setSettings(nextSettings);
       setMembers(nextMembers);
     } catch (cause) {
@@ -62,11 +73,23 @@ export function SettingsScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canManageTeam]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function changeRole(member: Member, role: Role) {
+    if (role === member.role) return;
+    try {
+      await updateMember(member.id, { role });
+      setMemberActions(null);
+      notify(`${member.fullName} est maintenant ${ROLE_LABELS[role].toLowerCase()}`);
+      await load();
+    } catch (cause) {
+      notify(cause instanceof ApiError ? cause.message : 'Modification impossible.', 'danger');
+    }
+  }
 
   async function toggleMember(member: Member) {
     try {
@@ -119,14 +142,16 @@ export function SettingsScreen() {
             title="Le restaurant"
             caption="Ces informations figurent sur vos tickets"
             action={
-              <Pressable
-                onPress={() => setRestaurantOpen(true)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Modifier les informations du restaurant"
-              >
-                <Icon name="edit" size={17} color={colors.primary} />
-              </Pressable>
+              canEditRestaurant ? (
+                <Pressable
+                  onPress={() => setRestaurantOpen(true)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Modifier les informations du restaurant"
+                >
+                  <Icon name="edit" size={17} color={colors.primary} />
+                </Pressable>
+              ) : undefined
             }
           />
 
@@ -173,58 +198,68 @@ export function SettingsScreen() {
         </Card>
 
         {/* --- Équipe ---------------------------------------------------- */}
-        <Card reveal={1} style={styles.card}>
-          <SectionHeader
-            title="L’équipe"
-            caption={`${members.length} personne(s) avec un accès`}
-            action={
-              <Pressable
-                onPress={() => setMemberOpen(true)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Ajouter un membre de l’équipe"
-              >
-                <Icon name="plus" size={18} color={colors.primary} strokeWidth={2.4} />
-              </Pressable>
-            }
-          />
+        {canManageTeam && (
+          <Card reveal={1} style={styles.card}>
+            <SectionHeader
+              title="L’équipe"
+              caption={`${members.length} personne(s) avec un accès`}
+              action={
+                <Pressable
+                  onPress={() => setMemberOpen(true)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ajouter un membre de l’équipe"
+                >
+                  <Icon name="plus" size={18} color={colors.primary} strokeWidth={2.4} />
+                </Pressable>
+              }
+            />
 
-          {members.map((member, index) => (
-            <View key={member.id}>
-              {index > 0 && <RowDivider />}
-              <ListRow
-                initials={initialsOf(member.fullName)}
-                iconColor={colors.iconBlue}
-                iconBackground={colors.pastelBlue}
-                title={member.fullName}
-                subtitle={member.email}
-                badge={
-                  member.isOwner ? (
-                    <View style={styles.ownerBadge}>
-                      <Text style={styles.ownerBadgeText}>Gérant</Text>
+            {members.map((member, index) => (
+              <View key={member.id}>
+                {index > 0 && <RowDivider />}
+                <ListRow
+                  initials={initialsOf(member.fullName)}
+                  iconColor={colors.iconBlue}
+                  iconBackground={colors.pastelBlue}
+                  title={member.fullName}
+                  subtitle={member.email}
+                  badge={
+                    <View style={[styles.roleBadge, member.role === 'manager' && styles.roleBadgeManager]}>
+                      <Text
+                        style={[
+                          styles.roleBadgeText,
+                          member.role === 'manager' && styles.roleBadgeTextManager,
+                        ]}
+                      >
+                        {ROLE_LABELS[member.role]}
+                      </Text>
                     </View>
-                  ) : undefined
-                }
-                value={member.isActive ? 'Actif' : 'Suspendu'}
-                valueTone={member.isActive ? 'positive' : 'muted'}
-                onPress={
-                  member.id === profile.user.id || member.isOwner
-                    ? undefined
-                    : () => setMemberActions(member)
-                }
-              />
-            </View>
-          ))}
+                  }
+                  value={member.isActive ? 'Actif' : 'Suspendu'}
+                  valueTone={member.isActive ? 'positive' : 'muted'}
+                  onPress={
+                    member.id === profile.user.id || member.isOwner
+                      ? undefined
+                      : () => setMemberActions(member)
+                  }
+                />
+              </View>
+            ))}
 
-          <Text style={styles.teamHint}>
-            Créez le compte d’un collègue et donnez-lui ses identifiants : il pourra se connecter
-            tout de suite, avec les mêmes droits que vous.
-          </Text>
-        </Card>
+            <Text style={styles.teamHint}>
+              Créez le compte d’un collègue et donnez-lui ses identifiants : il pourra se connecter
+              tout de suite. Son rôle décide de ce qu’il voit et de ce qu’il peut faire.
+            </Text>
+          </Card>
+        )}
 
         {/* --- Compte ---------------------------------------------------- */}
         <Card reveal={2} style={styles.card}>
-          <SectionHeader title="Votre compte" caption={profile.user.email} />
+          <SectionHeader
+            title="Votre compte"
+            caption={`${profile.user.email} · ${ROLE_LABELS[roleOf(profile)]}`}
+          />
 
           <ListRow
             icon="lock"
@@ -307,6 +342,21 @@ export function SettingsScreen() {
           </>
         }
       >
+        {memberActions && (
+          <View style={styles.roleBlock}>
+            <Text style={styles.blockLabel}>Rôle</Text>
+            <Segmented
+              options={ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role] }))}
+              value={memberActions.role}
+              onChange={(role) => void changeRole(memberActions, role)}
+            />
+            <Text style={styles.roleHint}>
+              {ROLE_DESCRIPTIONS[memberActions.role]} Un changement de rôle le déconnecte : il
+              retrouvera ses écrans à jour en se reconnectant.
+            </Text>
+          </View>
+        )}
+
         <Text style={styles.memberActionsText}>
           {memberActions?.isActive
             ? 'Suspendre coupe l’accès immédiatement, sans supprimer le compte : les ventes et dépenses qu’il a saisies gardent son nom.'
@@ -554,6 +604,8 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // Le rôle le plus courant pour un nouveau venu, et le moins risqué.
+  const [role, setRole] = useState<Role>('cashier');
   const [errors, setErrors] = useState<{
     fullName?: string;
     email?: string;
@@ -570,6 +622,7 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
     setPhone('');
     setPassword('');
     setConfirm('');
+    setRole('cashier');
     setErrors({});
     setError(null);
   }, [visible]);
@@ -592,8 +645,9 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
         email: email.trim().toLowerCase(),
         password,
         phone: phone.trim() === '' ? null : phone.trim(),
+        role,
       });
-      onDone(`Compte créé pour ${fullName.trim()}`);
+      onDone(`Compte ${ROLE_LABELS[role].toLowerCase()} créé pour ${fullName.trim()}`);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Création impossible.');
     } finally {
@@ -605,11 +659,21 @@ function MemberSheet({ visible, onClose, onDone }: MemberSheetProps) {
     <Sheet
       visible={visible}
       title="Nouveau membre de l’équipe"
-      subtitle="Il aura exactement les mêmes droits que vous"
+      subtitle="Choisissez son rôle selon son poste"
       error={error}
       onClose={onClose}
       actions={<Button label="Créer le compte" onPress={submit} loading={saving} />}
     >
+      <View style={styles.roleBlock}>
+        <Text style={styles.blockLabel}>Rôle</Text>
+        <Segmented
+          options={ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }))}
+          value={role}
+          onChange={setRole}
+        />
+        <Text style={styles.roleHint}>{ROLE_DESCRIPTIONS[role]}</Text>
+      </View>
+
       <Field
         label="Nom complet"
         value={fullName}
@@ -749,17 +813,39 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     textAlign: 'right',
   },
-  ownerBadge: {
-    backgroundColor: colors.primarySoft,
+  roleBadge: {
+    backgroundColor: colors.backgroundAlt,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
-  ownerBadgeText: {
+  roleBadgeManager: {
+    backgroundColor: colors.primarySoft,
+  },
+  roleBadgeText: {
     fontFamily: fontFamily.semiBold,
     fontSize: 10,
     lineHeight: 14,
+    color: colors.textSecondary,
+  },
+  roleBadgeTextManager: {
     color: colors.primary,
+  },
+  roleBlock: {
+    marginBottom: spacing.lg,
+  },
+  blockLabel: {
+    ...typography.small,
+    fontFamily: fontFamily.semiBold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  roleHint: {
+    ...typography.small,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
   },
   teamHint: {
     ...typography.small,

@@ -19,6 +19,8 @@ interface ListRowProps {
   /** Initiales à la place de l'icône (employés, clients). */
   initials?: string;
   badge?: React.ReactNode;
+  /** Lignes accordées au sous-titre avant troncature (une par défaut). */
+  subtitleLines?: number;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
 }
@@ -39,6 +41,7 @@ export function ListRow({
   iconBackground = colors.backgroundAlt,
   initials,
   badge,
+  subtitleLines = 1,
   onPress,
   style,
 }: ListRowProps) {
@@ -71,7 +74,7 @@ export function ListRow({
           {badge}
         </View>
         {Boolean(subtitle) && (
-          <Text style={styles.subtitle} numberOfLines={1}>
+          <Text style={styles.subtitle} numberOfLines={subtitleLines}>
             {subtitle}
           </Text>
         )}

@@ -1,5 +1,6 @@
 import { authed } from '../authed';
 import type { Profile } from '../auth';
+import type { Role } from '../permissions';
 
 /** §3 — Paramètres du restaurant, §2.b — équipe. */
 export interface RestaurantSettings {
@@ -22,6 +23,7 @@ export interface Member {
   fullName: string;
   phone: string | null;
   isOwner: boolean;
+  role: Role;
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
@@ -81,13 +83,15 @@ export function createMember(payload: {
   email: string;
   password: string;
   phone?: string | null;
+  role: Role;
 }): Promise<Member> {
   return authed<Member>('/api/users', { method: 'POST', body: payload });
 }
 
+/** Un changement de rôle déconnecte la personne : elle retrouve ses écrans à jour. */
 export function updateMember(
   id: string,
-  payload: { fullName?: string; phone?: string | null; isActive?: boolean },
+  payload: { fullName?: string; phone?: string | null; isActive?: boolean; role?: Role },
 ): Promise<Member> {
   return authed<Member>(`/api/users/${id}`, { method: 'PATCH', body: payload });
 }
@@ -106,10 +110,14 @@ export async function listInvitations(): Promise<Invitation[]> {
  * §2.b — Le jeton est renvoyé une seule fois : c'est au gérant de le
  * transmettre (WhatsApp, SMS). Il n'est jamais restocké en clair.
  */
-export function inviteMember(email: string, expiresInDays = 7): Promise<Invitation> {
+export function inviteMember(
+  email: string,
+  role: Role = 'cashier',
+  expiresInDays = 7,
+): Promise<Invitation> {
   return authed<Invitation>('/api/users/invitations', {
     method: 'POST',
-    body: { email, expiresInDays },
+    body: { email, role, expiresInDays },
   });
 }
 

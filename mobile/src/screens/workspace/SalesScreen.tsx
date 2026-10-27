@@ -98,7 +98,7 @@ export function SalesScreen() {
 // =========================================================================
 
 function NewSale() {
-  const { money, currency, refreshBalance, notify, navigate } = useWorkspace();
+  const { money, currency, refreshBalance, notify, navigate, can } = useWorkspace();
 
   const [category, setCategory] = useState('all');
 
@@ -164,12 +164,18 @@ function NewSale() {
   if (menu.error) return <ErrorState message={menu.error} onRetry={() => void menu.refresh()} />;
 
   if (dishes.length === 0) {
-    return (
+    return can('menu.manage') ? (
       <EmptyState
         icon="menu-book"
         title="Votre menu est vide"
         message="Ajoutez vos plats et leurs prix : ils apparaîtront ici pour être vendus en deux gestes."
         action={<Button label="Créer mon menu" onPress={() => navigate('menu')} />}
+      />
+    ) : (
+      <EmptyState
+        icon="menu-book"
+        title="Le menu est vide"
+        message="Votre gérant n’a pas encore saisi les plats. Ils apparaîtront ici dès qu’il l’aura fait."
       />
     );
   }
@@ -808,7 +814,9 @@ function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
 // =========================================================================
 
 function SalesHistory() {
-  const { money, refreshBalance, notify } = useWorkspace();
+  const { money, refreshBalance, notify, can } = useWorkspace();
+  // Le caissier ne reçoit que ses propres ventes : les totaux sont les siens.
+  const onlyOwn = !can('sales.view_all');
 
   const [filter, setFilter] = useState<'all' | SaleStatus>('all');
   const [page, setPage] = useState<SalesPage | null>(null);
@@ -893,7 +901,10 @@ function SalesHistory() {
         {page && (
           <Card reveal={0} style={styles.totalsCard}>
             <View style={styles.totalsRow}>
-              <Totals label="Chiffre d’affaires" value={money(page.totals.amount)} />
+              <Totals
+                label={onlyOwn ? 'Mes ventes' : 'Chiffre d’affaires'}
+                value={money(page.totals.amount)}
+              />
               <View style={styles.totalsSeparator} />
               <Totals label="Encaissé" value={money(page.totals.cashed)} tone={colors.success} />
               <View style={styles.totalsSeparator} />
@@ -906,7 +917,11 @@ function SalesHistory() {
           <EmptyState
             icon="ticket"
             title="Aucune vente"
-            message="Les ventes enregistrées apparaîtront ici, du plus récent au plus ancien."
+            message={
+              onlyOwn
+                ? 'Les ventes que vous encaissez apparaîtront ici, de la plus récente à la plus ancienne.'
+                : 'Les ventes enregistrées apparaîtront ici, de la plus récente à la plus ancienne.'
+            }
           />
         ) : (
           <Card reveal={1}>
@@ -938,7 +953,7 @@ function SalesHistory() {
         subtitle={detail ? formatDateTime(detail.soldAt) : undefined}
         onClose={() => setDetail(null)}
         actions={
-          detail && detail.status !== 'cancelled' ? (
+          detail && detail.status !== 'cancelled' && can('sales.cancel') ? (
             <Button
               label="Annuler cette vente"
               onPress={() => {

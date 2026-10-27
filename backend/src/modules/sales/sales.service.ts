@@ -326,12 +326,35 @@ export async function getSale(restaurantId: string, saleId: string): Promise<Sal
   return loadSale(restaurantId, saleId);
 }
 
+/**
+ * Le caissier ne consulte que ses propres ventes. Une vente d'un collègue
+ * lui répond « introuvable » : il n'a pas à savoir qu'elle existe.
+ */
+export async function assertSaleAuthor(
+  restaurantId: string,
+  saleId: string,
+  userId: string,
+): Promise<void> {
+  const row = await queryOne(
+    'SELECT 1 FROM sales WHERE id = $1 AND restaurant_id = $2 AND created_by = $3',
+    [saleId, restaurantId, userId],
+  );
+  if (!row) throw notFound('Vente');
+}
+
 export async function listSales(
   restaurantId: string,
   input: ListSalesInput,
+  /** Restreint la liste et les totaux aux ventes de ce compte. */
+  createdBy?: string,
 ): Promise<Paginated<Sale> & { totals: { amount: number; cashed: number; credit: number } }> {
   const conditions = ['s.restaurant_id = $1'];
   const params: unknown[] = [restaurantId];
+
+  if (createdBy) {
+    params.push(createdBy);
+    conditions.push(`s.created_by = $${params.length}`);
+  }
 
   if (input.paymentMethod) {
     params.push(input.paymentMethod);

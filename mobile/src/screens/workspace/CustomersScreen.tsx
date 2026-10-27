@@ -213,7 +213,7 @@ interface CustomerSheetProps {
 }
 
 function CustomerSheet({ visible, customer, onClose, onDelete, onDone }: CustomerSheetProps) {
-  const { money } = useWorkspace();
+  const { money, can } = useWorkspace();
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
@@ -269,7 +269,7 @@ function CustomerSheet({ visible, customer, onClose, onDelete, onDone }: Custome
       actions={
         <>
           <Button label="Enregistrer" onPress={submit} loading={saving} />
-          {customer && (
+          {customer && can('customers.delete') && (
             <Button
               label="Supprimer le client"
               onPress={() => onDelete(customer)}

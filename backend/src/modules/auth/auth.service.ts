@@ -1,4 +1,5 @@
 import { conflict, forbidden, unauthorized } from '../../core/errors';
+import { isRole, permissionsOf, type Permission, type Role } from '../../core/permissions';
 import { query, queryOne } from '../../db/pool';
 import { withTransaction } from '../../db/transaction';
 import { hashPassword, verifyPassword } from '../../utils/password';
@@ -18,6 +19,9 @@ export interface AuthenticatedProfile {
     fullName: string;
     phone: string | null;
     isOwner: boolean;
+    role: Role;
+    /** Ce que l'application peut afficher ; le serveur vérifie de son côté. */
+    permissions: Permission[];
   };
   restaurant: {
     id: string;
@@ -31,7 +35,7 @@ export interface AuthenticatedProfile {
 }
 
 const PROFILE_SQL = `
-  SELECT u.id, u.email, u.full_name, u.phone, u.is_owner,
+  SELECT u.id, u.email, u.full_name, u.phone, u.is_owner, u.role,
          r.id AS restaurant_id, r.name AS restaurant_name, r.status,
          r.currency_code, r.currency_symbol, r.currency_decimals, r.logo_media_id
     FROM users u
@@ -44,6 +48,7 @@ interface ProfileRow {
   full_name: string;
   phone: string | null;
   is_owner: boolean;
+  role: string;
   restaurant_id: string;
   restaurant_name: string;
   status: string;
@@ -54,6 +59,7 @@ interface ProfileRow {
 }
 
 function toProfile(row: ProfileRow): AuthenticatedProfile {
+  if (!isRole(row.role)) throw forbidden('Rôle de compte inconnu.');
   return {
     user: {
       id: row.id,
@@ -61,6 +67,8 @@ function toProfile(row: ProfileRow): AuthenticatedProfile {
       fullName: row.full_name,
       phone: row.phone,
       isOwner: row.is_owner,
+      role: row.role,
+      permissions: permissionsOf(row.role),
     },
     restaurant: {
       id: row.restaurant_id,
@@ -114,8 +122,8 @@ export async function register(input: RegisterInput): Promise<{
 
     const passwordHash = await hashPassword(input.password);
     const user = await tx.queryOne<{ id: string }>(
-      `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, is_owner)
-       VALUES ($1, $2, $3, $4, $5, true)
+      `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, is_owner, role)
+       VALUES ($1, $2, $3, $4, $5, true, 'manager')
        RETURNING id`,
       [restaurant.id, input.email, passwordHash, input.fullName, input.phone ?? null],
     );
@@ -145,7 +153,7 @@ export async function login(
   const row = await queryOne<
     ProfileRow & { password_hash: string; is_active: boolean; status_reason: string | null }
   >(
-    `SELECT u.id, u.email, u.full_name, u.phone, u.is_owner, u.password_hash, u.is_active,
+    `SELECT u.id, u.email, u.full_name, u.phone, u.is_owner, u.role, u.password_hash, u.is_active,
             r.id AS restaurant_id, r.name AS restaurant_name, r.status, r.status_reason,
             r.currency_code, r.currency_symbol, r.currency_decimals, r.logo_media_id
        FROM users u
@@ -212,8 +220,8 @@ export async function changePassword(
 }
 
 /**
- * §2.b — Un invité rejoint le restaurant avec exactement les mêmes droits
- * que celui qui l'a invité.
+ * §2.b — Un invité rejoint le restaurant avec le rôle choisi par le gérant
+ * au moment de l'invitation.
  */
 export async function acceptInvitation(
   input: AcceptInvitationInput,
@@ -224,8 +232,9 @@ export async function acceptInvitation(
     restaurant_id: string;
     email: string;
     status: string;
+    role: string;
   }>(
-    `SELECT i.id, i.restaurant_id, i.email, r.status
+    `SELECT i.id, i.restaurant_id, i.email, i.role, r.status
        FROM user_invitations i
        JOIN restaurants r ON r.id = i.restaurant_id
       WHERE i.token_hash = $1
@@ -246,8 +255,8 @@ export async function acceptInvitation(
   const userId = await withTransaction(async (tx) => {
     const passwordHash = await hashPassword(input.password);
     const user = await tx.queryOne<{ id: string }>(
-      `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, is_owner)
-       VALUES ($1, $2, $3, $4, $5, false)
+      `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, is_owner, role)
+       VALUES ($1, $2, $3, $4, $5, false, $6)
        RETURNING id`,
       [
         invitation.restaurant_id,
@@ -255,6 +264,7 @@ export async function acceptInvitation(
         passwordHash,
         input.fullName,
         input.phone ?? null,
+        invitation.role,
       ],
     );
     if (!user) throw new Error('Création de l’utilisateur impossible.');

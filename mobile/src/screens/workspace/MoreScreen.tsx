@@ -10,6 +10,7 @@ import { fontFamily, typography } from '../../theme/typography';
 import { radius, screenPadding, shadows, spacing } from '../../theme/layout';
 import { useWorkspace } from './WorkspaceContext';
 import type { WorkspaceRoute } from './WorkspaceContext';
+import { canOpen, tabRoutesFor } from './access';
 
 interface ModuleTile {
   route: WorkspaceRoute;
@@ -70,6 +71,14 @@ const MODULES: ModuleTile[] = [
     caption: () => 'Carnet d’adresses',
   },
   {
+    route: 'audit',
+    label: 'Journal',
+    icon: 'clock',
+    background: colors.pastelGreen,
+    color: colors.iconGreen,
+    caption: () => 'Qui a fait quoi, et quand',
+  },
+  {
     route: 'settings',
     label: 'Paramètres',
     icon: 'settings',
@@ -83,17 +92,27 @@ const MODULES: ModuleTile[] = [
  * Modules secondaires, regroupés pour tenir la barre d'onglets à cinq
  * entrées. Chaque tuile porte un chiffre à jour : le gérant voit d'un coup
  * d'œil ce qui réclame son attention.
+ *
+ * Seuls les modules ouverts au rôle apparaissent, et pas ceux qui ont
+ * déjà leur onglet.
  */
 export function MoreScreen() {
-  const { money, navigate } = useWorkspace();
+  const { profile, can, money, navigate } = useWorkspace();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  const tabs = tabRoutesFor(profile);
+  const modules = MODULES.filter(
+    (module) => canOpen(profile, module.route) && !tabs.includes(module.route),
+  );
+  const withFigures = can('dashboard.view');
+
   const load = useCallback(async () => {
+    if (!withFigures) return;
     await fetchSummary()
       .then(setSummary)
       .catch(() => undefined);
-  }, []);
+  }, [withFigures]);
 
   useEffect(() => {
     void load();
@@ -120,7 +139,7 @@ export function MoreScreen() {
       </Text>
 
       <View style={styles.grid}>
-        {MODULES.map((module, index) => (
+        {modules.map((module, index) => (
           <Reveal key={module.route} index={index} style={styles.tileSlot}>
             <DepthPressable
               onPress={() => navigate(module.route)}

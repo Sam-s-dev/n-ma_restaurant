@@ -1,4 +1,5 @@
 import { badRequest, conflict, notFound } from '../../core/errors';
+import type { Role } from '../../core/permissions';
 import { buildUpdate } from '../../core/sqlBuilder';
 import { query, queryOne } from '../../db/pool';
 import { hashPassword } from '../../utils/password';
@@ -12,6 +13,7 @@ export interface Member {
   fullName: string;
   phone: string | null;
   isOwner: boolean;
+  role: Role;
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
@@ -23,10 +25,14 @@ interface MemberRow {
   full_name: string;
   phone: string | null;
   is_owner: boolean;
+  role: Role;
   is_active: boolean;
   last_login_at: Date | null;
   created_at: Date;
 }
+
+const MEMBER_COLUMNS =
+  'id, email, full_name, phone, is_owner, role, is_active, last_login_at, created_at';
 
 const toMember = (row: MemberRow): Member => ({
   id: row.id,
@@ -34,6 +40,7 @@ const toMember = (row: MemberRow): Member => ({
   fullName: row.full_name,
   phone: row.phone,
   isOwner: row.is_owner,
+  role: row.role,
   isActive: row.is_active,
   lastLoginAt: row.last_login_at?.toISOString() ?? null,
   createdAt: row.created_at.toISOString(),
@@ -41,20 +48,18 @@ const toMember = (row: MemberRow): Member => ({
 
 export async function listMembers(restaurantId: string): Promise<Member[]> {
   const rows = await query<MemberRow>(
-    `SELECT id, email, full_name, phone, is_owner, is_active, last_login_at, created_at
+    `SELECT ${MEMBER_COLUMNS}
        FROM users WHERE restaurant_id = $1
-      ORDER BY is_owner DESC, full_name`,
+      ORDER BY is_owner DESC, role = 'manager' DESC, full_name`,
     [restaurantId],
   );
   return rows.map(toMember);
 }
 
 /**
- * §2.b — Le gérant crée directement le compte d'un collègue.
- *
- * Le nouveau venu a exactement les mêmes droits, sauf celui d'être
- * propriétaire : ce statut reste attaché au créateur de l'espace, seul
- * compte impossible à désactiver.
+ * §2.b — Le gérant crée directement le compte d'un collègue, avec le rôle
+ * qui correspond à son poste. Le statut de propriétaire reste attaché au
+ * créateur de l'espace, seul compte impossible à désactiver.
  */
 export async function createMember(
   restaurantId: string,
@@ -84,10 +89,10 @@ export async function createMember(
   const passwordHash = await hashPassword(input.password);
 
   const row = await queryOne<MemberRow>(
-    `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, email, full_name, phone, is_owner, is_active, last_login_at, created_at`,
-    [restaurantId, input.email, passwordHash, input.fullName, input.phone ?? null],
+    `INSERT INTO users (restaurant_id, email, password_hash, full_name, phone, role)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING ${MEMBER_COLUMNS}`,
+    [restaurantId, input.email, passwordHash, input.fullName, input.phone ?? null, input.role],
   );
   if (!row) throw new Error('Création du compte impossible.');
 
@@ -135,8 +140,8 @@ export async function updateMember(
   actorId: string,
   input: UpdateMemberInput,
 ): Promise<Member> {
-  const target = await queryOne<{ is_owner: boolean }>(
-    'SELECT is_owner FROM users WHERE id = $1 AND restaurant_id = $2',
+  const target = await queryOne<{ is_owner: boolean; role: Role }>(
+    'SELECT is_owner, role FROM users WHERE id = $1 AND restaurant_id = $2',
     [memberId, restaurantId],
   );
   if (!target) throw notFound('Utilisateur');
@@ -146,21 +151,33 @@ export async function updateMember(
     if (target.is_owner) throw badRequest('Le compte propriétaire ne peut pas être désactivé.');
   }
 
+  const roleChanges = input.role !== undefined && input.role !== target.role;
+  if (roleChanges) {
+    // Sans ces deux garde-fous, un restaurant pourrait se retrouver sans
+    // aucun gérant, et plus personne pour rétablir les droits.
+    if (memberId === actorId) throw badRequest('Vous ne pouvez pas changer votre propre rôle.');
+    if (target.is_owner) throw badRequest('Le créateur de l’espace reste gérant.');
+  }
+
   const { setClause, values, nextIndex } = buildUpdate(input, {
     fullName: 'full_name',
     phone: 'phone',
     isActive: 'is_active',
+    role: 'role',
   });
 
   const row = await queryOne<MemberRow>(
     `UPDATE users SET ${setClause}
       WHERE id = $${nextIndex} AND restaurant_id = $${nextIndex + 1}
-      RETURNING id, email, full_name, phone, is_owner, is_active, last_login_at, created_at`,
+      RETURNING ${MEMBER_COLUMNS}`,
     [...values, memberId, restaurantId],
   );
   if (!row) throw notFound('Utilisateur');
 
-  if (input.isActive === false) await revokeAllSessions('user', memberId);
+  // Un nouveau rôle oblige à se reconnecter : l'application recharge alors
+  // les écrans auxquels la personne a droit. Le serveur, lui, applique le
+  // changement dès la requête suivante.
+  if (input.isActive === false || roleChanges) await revokeAllSessions('user', memberId);
 
   return toMember(row);
 }
@@ -176,7 +193,7 @@ export interface Invitation {
 }
 
 /**
- * §2.b — Le gérant invite un collègue qui aura exactement les mêmes droits.
+ * §2.b — Le gérant invite un collègue, avec le rôle qu'il aura en arrivant.
  * L'envoi du lien est laissé à l'application (partage WhatsApp / SMS) :
  * pas de dépendance à un service d'e-mail pour cette version.
  */
@@ -199,10 +216,10 @@ export async function inviteUser(
   const expiresAt = new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000);
 
   const row = await queryOne<{ id: string; created_at: Date }>(
-    `INSERT INTO user_invitations (restaurant_id, email, token_hash, invited_by, expires_at)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO user_invitations (restaurant_id, email, token_hash, invited_by, expires_at, role)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, created_at`,
-    [restaurantId, input.email, hash, invitedBy, expiresAt],
+    [restaurantId, input.email, hash, invitedBy, expiresAt, input.role],
   );
   if (!row) throw new Error('Création de l’invitation impossible.');
 

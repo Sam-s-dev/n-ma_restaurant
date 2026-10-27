@@ -146,7 +146,7 @@ export const faqs: readonly Faq[] = [
   {
     question: 'Puis-je donner un accès à quelqu’un d’autre ?',
     answer:
-      'Oui. Depuis votre espace, vous invitez qui vous voulez — un associé, un gérant. Chaque personne invitée a exactement les mêmes droits que vous.',
+      'Oui. Depuis votre espace, vous créez le compte de chaque collègue avec son rôle : gérant, caissier ou magasinier. Le caissier encaisse sans voir la caisse ni vos chiffres, le magasinier tient le stock, et chaque action sensible reste inscrite au journal.',
   },
   {
     question: 'Comment sont suivies les ardoises ?',

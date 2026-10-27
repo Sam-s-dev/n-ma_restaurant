@@ -59,12 +59,52 @@ restaurant concerné.
 | Méthode | Route | Rôle |
 |---|---|---|
 | `GET` | `/api/users` | Membres du restaurant |
-| `PATCH` | `/api/users/:id` | Renommer / activer / désactiver |
-| `POST` | `/api/users/invitations` | Inviter (`{ "email": "…" }`) — renvoie le `token` **une seule fois** |
+| `POST` | `/api/users` | Créer un compte (`fullName`, `email`, `password`, `phone?`, `role`) |
+| `PATCH` | `/api/users/:id` | Renommer / activer / désactiver / changer de rôle |
+| `DELETE` | `/api/users/:id` | Retirer de l'équipe (désactive si le compte a saisi des écritures) |
+| `POST` | `/api/users/invitations` | Inviter (`{ "email": "…", "role": "cashier" }`) — renvoie le `token` **une seule fois** |
 | `GET` | `/api/users/invitations/list` | Invitations en attente |
 | `DELETE` | `/api/users/invitations/:id` | Révoquer une invitation |
 
-Tous les membres ont exactement les mêmes droits.
+### Rôles
+
+Chaque compte a un rôle : `manager` (gérant), `cashier` (caissier) ou
+`storekeeper` (magasinier). Les droits sont fixes par rôle et définis dans
+[backend/src/core/permissions.ts](backend/src/core/permissions.ts). Le profil
+renvoyé par `/api/auth/login` et `/api/auth/me` contient `user.role` et
+`user.permissions`. L'application mobile s'en sert pour masquer ce qui serait
+refusé, mais c'est le serveur qui contrôle : toute action interdite répond `403`.
+
+| | Gérant | Caissier | Magasinier |
+|---|:-:|:-:|:-:|
+| Encaisser, imprimer un ticket | ✅ | ✅ (ses propres ventes seulement) | — |
+| Annuler une vente, prix libre, vente antidatée | ✅ | — | — |
+| Clients (sauf suppression), créances, remboursements | ✅ | ✅ | — |
+| Consulter le menu, marquer un plat disponible ou épuisé | ✅ | ✅ | — |
+| Créer ou modifier un plat, gérer les catégories | ✅ | — | — |
+| Stock : consulter, corriger, déclarer une perte | ✅ | — | ✅ |
+| Dépenses : achat de stock | ✅ | — | ✅ (ne voit que les achats) |
+| Autres dépenses, annulation de dépense | ✅ | — | — |
+| Caisse, tableau de bord, plats vedettes | ✅ | — | — |
+| Personnel et salaires, équipe, paramètres, journal | ✅ | — | — |
+
+- Le créateur de l'espace reste gérant ; personne ne peut changer son propre rôle.
+- Le rôle est relu à chaque requête : un changement s'applique immédiatement.
+  Il révoque aussi les sessions de la personne, pour que l'application se
+  recharge avec ses nouveaux écrans.
+- Les comptes existant avant l'arrivée des rôles sont tous gérants.
+
+### Journal d'activité
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/audit` | Actions sensibles, de la plus récente à la plus ancienne (`?action=sale&userId=&from=&to=&page=`) |
+
+Chaque entrée indique l'auteur (nom et rôle au moment de l'action),
+l'action (`sale.cancelled`, `cash.adjusted`, `dish.updated`, `member.updated`…),
+l'objet concerné et les détails saisis (motif, montant, nouveau prix), sans
+mot de passe. Seules les actions réussies sont inscrites. Le journal est en
+écriture seule : rien ne s'y modifie ni ne s'y efface.
 
 ---
 

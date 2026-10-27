@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireUser } from '../middlewares/auth';
+import { auditRouter } from '../modules/audit/audit.routes';
 import { authRouter } from '../modules/auth/auth.routes';
 import { cashRouter } from '../modules/cash/cash.routes';
 import { creditsRouter } from '../modules/credits/credits.routes';
@@ -39,5 +40,6 @@ restaurantSpace.use('/customers', customersRouter);   // §8  Clients
 restaurantSpace.use('/credits', creditsRouter);       // §8  Créances
 restaurantSpace.use('/expenses', expensesRouter);     // §9  Dépenses
 restaurantSpace.use('/dashboard', dashboardRouter);   // §10 Synthèse
+restaurantSpace.use('/audit', auditRouter);           // Journal d'activité
 
 apiRouter.use('/', restaurantSpace);
