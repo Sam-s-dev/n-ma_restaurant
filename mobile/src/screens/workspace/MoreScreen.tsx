@@ -71,6 +71,22 @@ const MODULES: ModuleTile[] = [
     caption: () => 'Carnet d’adresses',
   },
   {
+    route: 'orders',
+    label: 'Commandes',
+    icon: 'globe',
+    background: colors.pastelGreen,
+    color: colors.iconGreen,
+    caption: () => 'Mini-site et livraisons',
+  },
+  {
+    route: 'online',
+    label: 'Mini-site',
+    icon: 'globe',
+    background: colors.pastelBlue,
+    color: colors.iconBlue,
+    caption: () => 'Lien, QR code, zones de livraison',
+  },
+  {
     route: 'purchases',
     label: 'Achats',
     icon: 'cart',

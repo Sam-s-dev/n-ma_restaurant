@@ -63,6 +63,10 @@ export function createApp() {
       expenses: '/api/expenses',
       dashboard: '/api/dashboard',
       media: '/api/media',
+      online: '/api/online',
+      orders: '/api/orders',
+      deliveries: '/api/deliveries',
+      public: '/api/public',
     });
   });
 

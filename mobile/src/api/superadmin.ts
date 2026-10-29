@@ -26,6 +26,9 @@ export interface RestaurantSummary {
   currencySymbol: string;
   currencyDecimals: number;
   logoMediaId: string | null;
+  slug: string | null;
+  onlineAllowed: boolean;
+  onlineEnabled: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   usersCount: number;
@@ -100,5 +103,14 @@ export function disableRestaurant(
     method: 'POST',
     token,
     body: { reason },
+  });
+}
+
+/** Mini-site de commande autorisé ou non pour ce restaurant. */
+export function setOnlineAllowed(token: string, id: string, allowed: boolean): Promise<RestaurantSummary> {
+  return request<RestaurantSummary>(`/api/super-admin/restaurants/${id}/online`, {
+    method: 'POST',
+    token,
+    body: { allowed },
   });
 }

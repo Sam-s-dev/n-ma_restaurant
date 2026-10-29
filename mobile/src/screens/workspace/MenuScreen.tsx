@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../components/workspace/ScreenState
 import { SearchField } from '../../components/workspace/SearchField';
 import { PhotoField } from '../../components/workspace/PhotoField';
 import { Sheet } from '../../components/workspace/Sheet';
+import { ToggleRow } from '../../components/workspace/ToggleRow';
 import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import { useResource } from '../../api/cache';
 import {
@@ -318,6 +319,7 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
   const [categoryId, setCategoryId] = useState<string>('none');
   const [photoMediaId, setPhotoMediaId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState('');
+  const [isOnline, setIsOnline] = useState(true);
   const [errors, setErrors] = useState<{ name?: string; price?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -330,6 +332,7 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
     setCategoryId(dish?.categoryId ?? 'none');
     setPhotoMediaId(dish?.photoMediaId ?? null);
     setQuantity(dish?.availableQuantity !== null && dish ? String(dish.availableQuantity) : '');
+    setIsOnline(dish?.isOnline ?? true);
     setErrors({});
     setError(null);
   }, [visible, dish]);
@@ -356,6 +359,7 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
         description: description.trim() === '' ? null : description.trim(),
         photoMediaId,
         availableQuantity: parsedQuantity,
+        isOnline,
       };
 
       if (dish) {
@@ -428,6 +432,13 @@ function DishSheet({ visible, dish, categories, onClose, onDelete, onDone }: Dis
             ? 'Ce plat est épuisé. Saisissez la quantité préparée pour le remettre en vente.'
             : 'Chaque vente en retire une. À zéro, le plat sort de la carte. Laissez vide pour ne pas compter.'
         }
+      />
+
+      <ToggleRow
+        label="Proposé en ligne"
+        hint="Visible sur votre mini-site de commande. Désactivez-le pour un plat servi au comptoir seulement."
+        value={isOnline}
+        onChange={setIsOnline}
       />
 
       <Text style={styles.blockLabel}>Catégorie</Text>

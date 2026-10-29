@@ -25,6 +25,7 @@ const FILTERS: Array<{ value: 'all' | AuditFamily; label: string }> = [
   { value: 'dish', label: 'Menu' },
   { value: 'salary', label: 'Salaires' },
   { value: 'member', label: 'Équipe' },
+  { value: 'order', label: 'Commandes' },
 ];
 
 const PAGE_SIZE = 40;
@@ -63,6 +64,17 @@ const ACTIONS: Record<string, ActionStyle> = {
   'member.updated': { title: 'Compte modifié', icon: 'user', ...TEAM },
   'member.removed': { title: 'Compte retiré', icon: 'user', ...TEAM },
   'settings.updated': { title: 'Informations du restaurant modifiées', icon: 'settings', ...NEUTRAL },
+  'order.accepted': { title: 'Commande en ligne acceptée', icon: 'globe', ...NEUTRAL },
+  'order.rejected': { title: 'Commande en ligne refusée', icon: 'close', ...DANGER },
+  'order.assigned': { title: 'Commande confiée au livreur', icon: 'truck', ...TEAM },
+  'order.cancelled': { title: 'Commande en ligne annulée', icon: 'close', ...DANGER },
+  'order.completed': { title: 'Commande en ligne encaissée', icon: 'globe', ...MONEY },
+  'delivery.delivered': { title: 'Livraison effectuée', icon: 'truck', ...MONEY },
+  'delivery.issue': { title: 'Problème de livraison', icon: 'truck', ...DANGER },
+  'online.settings_updated': { title: 'Mini-site modifié', icon: 'globe', ...NEUTRAL },
+  'online.zone_created': { title: 'Zone de livraison ajoutée', icon: 'map-pin', ...NEUTRAL },
+  'online.zone_updated': { title: 'Zone de livraison modifiée', icon: 'map-pin', ...NEUTRAL },
+  'online.zone_deleted': { title: 'Zone de livraison supprimée', icon: 'map-pin', ...NEUTRAL },
 };
 
 /**

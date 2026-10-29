@@ -42,6 +42,9 @@ import { AuditScreen } from './AuditScreen';
 import { PurchasesScreen } from './PurchasesScreen';
 import { NotificationsScreen } from './NotificationsScreen';
 import { ReportsScreen } from './ReportsScreen';
+import { OrdersScreen } from './OrdersScreen';
+import { DeliveriesScreen } from './DeliveriesScreen';
+import { OnlineScreen } from './OnlineScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 
 interface WorkspaceScreenProps {
@@ -66,6 +69,9 @@ const TITLES: Record<WorkspaceRoute, string> = {
   purchases: 'Demandes d’achat',
   notifications: 'Notifications',
   reports: 'Rapports et exports',
+  orders: 'Commandes en ligne',
+  deliveries: 'Mes livraisons',
+  online: 'Mini-site de commande',
 };
 
 /** Interrogation des notifications : assez vite pour ressembler à une messagerie. */
@@ -86,6 +92,9 @@ const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>
   purchases: { label: 'Achats', icon: 'cart' },
   notifications: { label: 'Alertes', icon: 'bell' },
   reports: { label: 'Rapports', icon: 'bar-chart' },
+  orders: { label: 'Commandes', icon: 'globe' },
+  deliveries: { label: 'Livraisons', icon: 'truck' },
+  online: { label: 'Mini-site', icon: 'globe' },
   more: { label: 'Plus', icon: 'grid' },
 };
 
@@ -413,6 +422,12 @@ function renderRoute(route: WorkspaceRoute) {
       return <NotificationsScreen />;
     case 'reports':
       return <ReportsScreen />;
+    case 'orders':
+      return <OrdersScreen />;
+    case 'deliveries':
+      return <DeliveriesScreen />;
+    case 'online':
+      return <OnlineScreen />;
     default:
       return null;
   }

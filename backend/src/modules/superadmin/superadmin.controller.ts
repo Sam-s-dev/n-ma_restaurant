@@ -7,6 +7,7 @@ import {
   activateSchema,
   disableSchema,
   listRestaurantsSchema,
+  onlineSchema,
   superAdminChangePasswordSchema,
   superAdminLoginSchema,
 } from './superadmin.schemas';
@@ -43,6 +44,12 @@ export async function disableRestaurant(req: Request, res: Response) {
   const { id } = parseOrThrow(idParam, req.params, 'requête');
   const input = parseOrThrow(disableSchema, req.body, 'requête');
   res.json(await service.disableRestaurant(id, input.reason));
+}
+
+export async function setOnline(req: Request, res: Response) {
+  const { id } = parseOrThrow(idParam, req.params, 'requête');
+  const { allowed } = parseOrThrow(onlineSchema, req.body, 'requête');
+  res.json(await service.setOnlineAllowed(id, allowed));
 }
 
 export async function stats(_req: Request, res: Response) {

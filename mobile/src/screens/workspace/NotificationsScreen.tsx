@@ -34,6 +34,12 @@ function styleOf(kind: string): KindStyle {
       return kind.endsWith('with_difference')
         ? { icon: 'wallet', color: colors.iconRed, background: colors.pastelRed }
         : { icon: 'wallet', color: colors.iconGreen, background: colors.pastelGreen };
+    case 'order':
+      return kind.endsWith('issue') || kind.endsWith('cancelled')
+        ? { icon: 'globe', color: colors.iconRed, background: colors.pastelRed }
+        : { icon: 'globe', color: colors.iconGreen, background: colors.pastelGreen };
+    case 'delivery':
+      return { icon: 'truck', color: colors.iconBlue, background: colors.pastelBlue };
     case 'member':
       return { icon: 'user', color: colors.iconPurple, background: colors.pastelPurple };
     default:

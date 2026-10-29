@@ -9,6 +9,8 @@ import { dashboardRouter } from '../modules/dashboard/dashboard.routes';
 import { expensesRouter } from '../modules/expenses/expenses.routes';
 import { mediaRouter } from '../modules/media/media.routes';
 import { menuRouter } from '../modules/menu/menu.routes';
+import { onlineRouter, publicRouter } from '../modules/online/online.routes';
+import { deliveriesRouter, ordersRouter } from '../modules/orders/orders.routes';
 import { notificationsRouter } from '../modules/notifications/notifications.routes';
 import { purchasesRouter } from '../modules/purchases/purchases.routes';
 import { restaurantRouter } from '../modules/restaurant/restaurant.routes';
@@ -26,6 +28,7 @@ export const apiRouter = Router();
 apiRouter.use('/auth', authRouter);              // §2.b — restaurants
 apiRouter.use('/super-admin', superAdminRouter); // §2.a — éditeur
 apiRouter.use('/media', mediaRouter);            // images (lecture publique)
+apiRouter.use('/public', publicRouter);          // mini-sites des restaurants
 
 // --- Espace restaurant ---------------------------------------------------
 // `requireUser` injecte le restaurant_id du jeton : chaque module ne voit
@@ -49,5 +52,8 @@ restaurantSpace.use('/audit', auditRouter);           // Journal d'activité
 restaurantSpace.use('/notifications', notificationsRouter);
 restaurantSpace.use('/purchases', purchasesRouter);   // Demandes d'achat
 restaurantSpace.use('/reports', reportsRouter);       // Rapports et exports
+restaurantSpace.use('/online', onlineRouter);         // Mini-site : réglages, zones
+restaurantSpace.use('/orders', ordersRouter);         // Commandes en ligne
+restaurantSpace.use('/deliveries', deliveriesRouter); // Courses du livreur
 
 apiRouter.use('/', restaurantSpace);

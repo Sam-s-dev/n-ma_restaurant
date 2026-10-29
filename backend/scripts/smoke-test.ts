@@ -1559,6 +1559,297 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
+  section('16 sexies. Mini-site, commandes en ligne et livreur');
+
+  const slug = `resto-${stamp}`.toLowerCase();
+  const hiddenSite = await call('GET', `/api/public/r/${slug}`);
+  check('sans adresse choisie, aucun mini-site (404)', hiddenSite.status === 404, hiddenSite.status);
+
+  const deniedOnline = await call('PATCH', '/api/online/settings', {
+    token: till,
+    body: { slug, enabled: true },
+  });
+  check('le caissier ne règle pas le mini-site (403)', deniedOnline.status === 403, deniedOnline.status);
+
+  const onlineSettings = await call('PATCH', '/api/online/settings', {
+    token,
+    body: { slug, enabled: true, message: 'Livraison en 45 minutes' },
+  });
+  check('le gérant choisit son adresse et ouvre les commandes', onlineSettings.body?.enabled === true, onlineSettings.body);
+
+  const takenSlug = await call('PATCH', '/api/online/settings', { token: otherToken, body: { slug } });
+  check('l’adresse d’un autre restaurant est refusée (409)', takenSlug.status === 409, takenSlug.body);
+
+  const zone = await call('POST', '/api/online/zones', { token, body: { name: 'Kipé', fee: 10000 } });
+  check('zone de livraison créée avec son prix', zone.status === 201 && zone.body?.fee === 10000, zone.body);
+  const zoneRenamed = await call('PATCH', `/api/online/zones/${zone.body?.id}`, {
+    token,
+    body: { isActive: false },
+  });
+  await call('PATCH', `/api/online/zones/${zone.body?.id}`, { token, body: { name: 'Kipé centre' } });
+  const zonesAfterRename = await call('GET', '/api/online/zones', { token });
+  check(
+    'renommer une zone ne la réactive pas',
+    zoneRenamed.body?.isActive === false && zonesAfterRename.body?.data?.[0]?.isActive === false,
+    zonesAfterRename.body,
+  );
+  await call('PATCH', `/api/online/zones/${zone.body?.id}`, { token, body: { isActive: true } });
+
+  const onlineDish = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: `Poulet braisé ${stamp}`, price: 40000, availableQuantity: 3 },
+  });
+  const offlineDish = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: `Plat du comptoir ${stamp}`, price: 5000, isOnline: false },
+  });
+  await call('PATCH', `/api/menu/dishes/${offlineDish.body?.id}`, { token, body: { price: 6000 } });
+  const offlineAfterEdit = await call('GET', `/api/menu/dishes/${offlineDish.body?.id}`, { token });
+  check('modifier un plat ne le remet pas en ligne', offlineAfterEdit.body?.isOnline === false, offlineAfterEdit.body);
+
+  const site = await call('GET', `/api/public/r/${slug}`);
+  check('le mini-site est public, sans compte (200)', site.status === 200, site.body);
+  check('il est ouvert et propose la livraison', site.body?.ordering?.open && site.body?.ordering?.delivery, site.body?.ordering);
+  check(
+    'seuls les plats choisis pour la vente en ligne y figurent',
+    site.body?.dishes?.some((d: any) => d.id === onlineDish.body?.id) &&
+      !site.body?.dishes?.some((d: any) => d.id === offlineDish.body?.id),
+    site.body?.dishes?.map((d: any) => d.name),
+  );
+  check(
+    'aucune donnée interne n’est exposée',
+    !JSON.stringify(site.body).includes(restaurantId) && site.body?.restaurant?.id === undefined,
+    site.body?.restaurant,
+  );
+
+  const orderBody = {
+    customerName: 'Mariama Client',
+    customerPhone: '622 11 22 33',
+    mode: 'delivery',
+    zoneId: zone.body?.id,
+    landmark: 'Derrière la station Total',
+    paymentMethod: 'cash',
+    items: [{ dishId: onlineDish.body?.id, quantity: 2 }],
+  };
+  const noLandmark = await call('POST', `/api/public/r/${slug}/orders`, {
+    body: { ...orderBody, landmark: '' },
+  });
+  check('une livraison sans point de repère est refusée (400)', noLandmark.status === 400, noLandmark.body);
+  const counterOnly = await call('POST', `/api/public/r/${slug}/orders`, {
+    body: { ...orderBody, items: [{ dishId: offlineDish.body?.id, quantity: 1 }] },
+  });
+  check('un plat hors ligne ne se commande pas (422)', counterOnly.status === 422, counterOnly.body);
+
+  const placed = await call('POST', `/api/public/r/${slug}/orders`, {
+    body: { ...orderBody, items: [{ dishId: onlineDish.body?.id, quantity: 2, unitPrice: 1 }] },
+  });
+  check('le client passe commande (201)', placed.status === 201, placed.body);
+  check(
+    'le total vient de la carte et de la zone : 2 × 40 000 + 10 000',
+    placed.body?.totalAmount === 90000 && placed.body?.deliveryFee === 10000,
+    placed.body,
+  );
+  const code: string = placed.body?.trackingCode;
+  check('il reçoit un code de suivi', typeof code === 'string' && code.length >= 10, placed.body);
+
+  const tracked = await call('GET', `/api/public/orders/${code}`);
+  check('le suivi montre la commande reçue', tracked.body?.status === 'pending', tracked.body);
+  const badCode = await call('GET', '/api/public/orders/AAAAAAAAAAAA');
+  check('un code inventé ne mène nulle part (404)', badCode.status === 404, badCode.status);
+
+  const orderInbox = await call('GET', '/api/notifications', { token: till });
+  check(
+    'le caissier est prévenu de la nouvelle commande',
+    orderInbox.body?.items?.some((n: any) => n.kind === 'order.new' && n.body.includes('Mariama')),
+    orderInbox.body?.items?.map((n: any) => n.kind),
+  );
+
+  const onlineQueue = await call('GET', '/api/orders?group=active', { token: till });
+  const orderId: string = onlineQueue.body?.data?.find((o: any) => o.trackingCode === code)?.id;
+  check('elle apparaît dans les commandes à traiter', Boolean(orderId) && onlineQueue.body?.counts?.pending >= 1, onlineQueue.body?.counts);
+
+  const otherSees = await call('GET', `/api/orders/${orderId}`, { token: otherToken });
+  check('un autre restaurant ne la voit pas (404)', otherSees.status === 404, otherSees.status);
+
+  const driverCreated = await call('POST', '/api/users', {
+    token,
+    body: {
+      fullName: 'Ibrahima Livreur',
+      email: `livreur.${stamp}@exemple.com`,
+      password: colleaguePassword,
+      phone: '624 00 00 00',
+      role: 'driver',
+      employee: { position: 'Livreur', monthlySalary: 1500000, hireDate: today },
+    },
+  });
+  check('le gérant crée un compte livreur', driverCreated.body?.role === 'driver', driverCreated.body);
+  const driverFile: string = driverCreated.body?.employee?.id;
+  await call('PATCH', `/api/staff/${driverFile}`, { token, body: { phone: '624 00 00 01' } });
+  const driverFileAfter = await call('GET', `/api/staff/${driverFile}`, { token });
+  check(
+    'corriger la fiche d’un employé ne remet pas son salaire à zéro',
+    driverFileAfter.body?.monthlySalary === 1500000,
+    driverFileAfter.body,
+  );
+
+  const driverLogin = await call('POST', '/api/auth/login', {
+    body: { email: `livreur.${stamp}@exemple.com`, password: colleaguePassword },
+  });
+  const driver: string = driverLogin.body?.accessToken;
+  check(
+    'le livreur n’a que le droit de livrer',
+    JSON.stringify(driverLogin.body?.profile?.user?.permissions) === JSON.stringify(['deliveries.handle']),
+    driverLogin.body?.profile?.user?.permissions,
+  );
+  const driverNoSales = await call('GET', '/api/orders', { token: driver });
+  check('il ne voit pas les commandes du restaurant (403)', driverNoSales.status === 403, driverNoSales.status);
+
+  const accepted = await call('POST', `/api/orders/${orderId}/accept`, { token: till });
+  check('le caissier accepte après l’appel', accepted.body?.status === 'accepted', accepted.body);
+  const reserved = await call('GET', `/api/menu/dishes/${onlineDish.body?.id}`, { token });
+  check('les portions sont réservées (3 − 2 = 1)', reserved.body?.availableQuantity === 1, reserved.body);
+
+  const assigned = await call('POST', `/api/orders/${orderId}/assign`, {
+    token: till,
+    body: { driverId: driverCreated.body?.id },
+  });
+  check('il confie la commande au livreur', assigned.body?.driver?.fullName === 'Ibrahima Livreur', assigned.body);
+  const notADriver = await call('POST', `/api/orders/${orderId}/assign`, {
+    token: till,
+    body: { driverId: created.body?.id },
+  });
+  check('seul un livreur peut recevoir une course (404)', notADriver.status === 404, notADriver.body);
+
+  const driverInbox = await call('GET', '/api/notifications', { token: driver });
+  check(
+    'le livreur est prévenu, avec le montant à encaisser',
+    driverInbox.body?.items?.some((n: any) => n.kind === 'delivery.assigned' && n.body.includes('90 000')),
+    driverInbox.body?.items?.map((n: any) => n.body),
+  );
+
+  await call('POST', `/api/orders/${orderId}/ready`, { token: till });
+  const mine = await call('GET', '/api/deliveries', { token: driver });
+  check(
+    'le livreur voit sa course : adresse, repère et téléphone',
+    mine.body?.data?.[0]?.landmark === 'Derrière la station Total' &&
+      mine.body?.data?.[0]?.customerPhone === '622 11 22 33',
+    mine.body?.data?.[0],
+  );
+
+  const deliverTooEarly = await call('POST', `/api/deliveries/${orderId}/deliver`, {
+    token: driver,
+    body: { collectedMethod: 'cash' },
+  });
+  check('on ne livre pas une course pas encore partie (409)', deliverTooEarly.status === 409, deliverTooEarly.body);
+
+  await call('POST', `/api/deliveries/${orderId}/dispatch`, { token: driver });
+  const onTheWay = await call('GET', `/api/public/orders/${code}`);
+  check(
+    'le client voit sa commande en route, avec le prénom du livreur',
+    onTheWay.body?.status === 'out_for_delivery' && onTheWay.body?.driverName === 'Ibrahima',
+    onTheWay.body,
+  );
+  const customerLateCancel = await call('POST', `/api/public/orders/${code}/cancel`);
+  check('le client ne peut plus annuler une commande acceptée (409)', customerLateCancel.status === 409, customerLateCancel.body);
+
+  const balanceBeforeOrder: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  const delivered = await call('POST', `/api/deliveries/${orderId}/deliver`, {
+    token: driver,
+    body: { collectedMethod: 'cash' },
+  });
+  check('le livreur marque la course livrée', delivered.body?.status === 'delivered', delivered.body);
+  const balanceAfterDelivery: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('l’argent n’est pas encore en caisse', balanceAfterDelivery === balanceBeforeOrder, {
+    avant: balanceBeforeOrder,
+    après: balanceAfterDelivery,
+  });
+
+  const drivers = await call('GET', '/api/orders/drivers', { token });
+  check(
+    'le gérant voit les 90 000 à reverser par le livreur',
+    drivers.body?.data?.find((d: any) => d.id === driverCreated.body?.id)?.toHandOver === 90000,
+    drivers.body,
+  );
+
+  const settleClosed = await call('POST', `/api/orders/${orderId}/complete`, { token: till });
+  check('sans caisse ouverte, le caissier n’encaisse pas (409)', settleClosed.status === 409, settleClosed.body);
+  await call('POST', '/api/cash/sessions/open', { token: till, body: { openingFloat: 0 } });
+  const settled = await call('POST', `/api/orders/${orderId}/complete`, { token: till });
+  check('le caissier reçoit l’argent du livreur', settled.body?.status === 'completed', settled.body);
+  check('la commande devient une vente', typeof settled.body?.saleReference === 'string', settled.body);
+  const balanceAfterSettle: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse augmente de 90 000', balanceAfterSettle === balanceBeforeOrder + 90000, {
+    avant: balanceBeforeOrder,
+    après: balanceAfterSettle,
+  });
+  const orderSale = await call('GET', `/api/sales/${settled.body?.saleId}`, { token });
+  check(
+    'le ticket porte les plats et la livraison',
+    orderSale.body?.items?.some((i: any) => i.dishName === 'Livraison — Kipé centre' && i.lineTotal === 10000) &&
+      orderSale.body?.customerPhone === '622 11 22 33',
+    orderSale.body?.items,
+  );
+  const settledAgain = await call('POST', `/api/orders/${orderId}/complete`, { token: till });
+  check('une commande ne s’encaisse qu’une fois (409)', settledAgain.status === 409, settledAgain.body);
+
+  // Une deuxième commande, à retirer, que le client annule lui-même.
+  const pickup = await call('POST', `/api/public/r/${slug}/orders`, {
+    body: { ...orderBody, mode: 'pickup', zoneId: null, items: [{ dishId: onlineDish.body?.id, quantity: 1 }] },
+  });
+  check('commande à retirer : pas de frais de livraison', pickup.body?.deliveryFee === 0 && pickup.body?.totalAmount === 40000, pickup.body);
+  const selfCancel = await call('POST', `/api/public/orders/${pickup.body?.trackingCode}/cancel`);
+  check('le client annule tant qu’elle n’est pas acceptée', selfCancel.body?.status === 'cancelled', selfCancel.body);
+
+  // Une troisième, acceptée puis annulée : la portion revient au plat.
+  const third = await call('POST', `/api/public/r/${slug}/orders`, {
+    body: { ...orderBody, mode: 'pickup', zoneId: null, items: [{ dishId: onlineDish.body?.id, quantity: 1 }] },
+  });
+  const thirdId = (await call('GET', '/api/orders?group=active', { token })).body?.data?.find(
+    (o: any) => o.trackingCode === third.body?.trackingCode,
+  )?.id;
+  await call('POST', `/api/orders/${thirdId}/accept`, { token });
+  const reservedOut = await call('GET', `/api/menu/dishes/${onlineDish.body?.id}`, { token });
+  check('la dernière portion réservée met le plat en rupture', reservedOut.body?.isAvailable === false, reservedOut.body);
+  const cancelled = await call('POST', `/api/orders/${thirdId}/cancel`, {
+    token,
+    body: { reason: 'Client injoignable' },
+  });
+  const restored = await call('GET', `/api/menu/dishes/${onlineDish.body?.id}`, { token });
+  check(
+    'annulée, la commande rend sa portion au plat',
+    cancelled.body?.status === 'cancelled' && restored.body?.availableQuantity === 1 && restored.body?.isAvailable,
+    restored.body,
+  );
+
+  await call('PATCH', '/api/online/settings', { token, body: { enabled: false } });
+  const closedSite = await call('POST', `/api/public/r/${slug}/orders`, { body: { ...orderBody, mode: 'pickup', zoneId: null } });
+  check('commandes fermées : le mini-site refuse (422)', closedSite.status === 422, closedSite.body);
+
+  const superOff = await call('POST', `/api/super-admin/restaurants/${restaurantId}/online`, {
+    token: superToken,
+    body: { allowed: false },
+  });
+  const goneSite = await call('GET', `/api/public/r/${slug}`);
+  check(
+    'le Super Admin retire le mini-site : la page disparaît',
+    superOff.body?.onlineAllowed === false && goneSite.status === 404,
+    { superAdmin: superOff.body?.onlineAllowed, page: goneSite.status },
+  );
+  await call('POST', `/api/super-admin/restaurants/${restaurantId}/online`, {
+    token: superToken,
+    body: { allowed: true },
+  });
+
+  // Remise en état : la vente annulée, la caisse revient à son état d'avant.
+  await call('POST', `/api/sales/${settled.body?.saleId}/cancel`, { token, body: { reason: 'Test commande en ligne' } });
+  await call('POST', '/api/cash/sessions/close', { token: till, body: { countedCash: 0, note: 'Fin du test' } });
+  const balanceAfterOrders: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse revient à son état d’avant', balanceAfterOrders === balanceBeforeOrder, {
+    avant: balanceBeforeOrder,
+    après: balanceAfterOrders,
+  });
+
+  // ---------------------------------------------------------------------
   section('17. Désactivation par le Super Admin (§2.a)');
   const noReason = await call('POST', `/api/super-admin/restaurants/${restaurantId}/disable`, {
     token: superToken,

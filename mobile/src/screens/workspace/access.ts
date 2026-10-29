@@ -17,6 +17,9 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
   customers: ['customers.manage'],
   audit: ['audit.view'],
   reports: ['reports.export'],
+  orders: ['orders.manage'],
+  deliveries: ['deliveries.handle'],
+  online: ['settings.manage'],
   // Le compte personnel (mot de passe, déconnexion) est ouvert à tous.
   settings: null,
   notifications: null,
@@ -25,14 +28,16 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
 
 /**
  * Ordre de préférence pour la barre d'onglets : le gérant retrouve
- * exactement ses cinq onglets habituels, le caissier et le magasinier
- * voient les leurs remonter à la place de ceux qui leur sont fermés.
+ * exactement ses cinq onglets habituels, le caissier, le magasinier et le
+ * livreur voient les leurs remonter à la place de ceux qui leur sont fermés.
  */
 const TAB_CANDIDATES: WorkspaceRoute[] = [
   'dashboard',
+  'deliveries',
   'sales',
   'cash',
   'menu',
+  'orders',
   'stock',
   'purchases',
   'credits',

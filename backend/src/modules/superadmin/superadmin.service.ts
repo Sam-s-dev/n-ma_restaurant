@@ -16,6 +16,9 @@ export interface RestaurantSummary {
   currencySymbol: string;
   currencyDecimals: number;
   logoMediaId: string | null;
+  slug: string | null;
+  onlineAllowed: boolean;
+  onlineEnabled: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   usersCount: number;
@@ -70,6 +73,9 @@ interface RestaurantRow {
   currency_symbol: string;
   currency_decimals: number;
   logo_media_id: string | null;
+  slug: string | null;
+  online_allowed: boolean;
+  online_enabled: boolean;
   owner_name: string | null;
   owner_email: string | null;
   users_count: number;
@@ -91,6 +97,9 @@ function toSummary(row: RestaurantRow): RestaurantSummary {
     currencySymbol: row.currency_symbol,
     currencyDecimals: row.currency_decimals,
     logoMediaId: row.logo_media_id,
+    slug: row.slug,
+    onlineAllowed: row.online_allowed,
+    onlineEnabled: row.online_enabled,
     ownerName: row.owner_name,
     ownerEmail: row.owner_email,
     usersCount: row.users_count,
@@ -104,6 +113,7 @@ function toSummary(row: RestaurantRow): RestaurantSummary {
 const RESTAURANT_SELECT = `
   SELECT r.id, r.name, r.address, r.phone, r.status, r.status_reason,
          r.currency_code, r.currency_symbol, r.currency_decimals, r.logo_media_id,
+         r.slug, r.online_allowed, r.online_enabled,
          r.created_at, r.activated_at, r.disabled_at,
          owner.full_name AS owner_name,
          owner.email     AS owner_email,
@@ -203,6 +213,22 @@ export async function disableRestaurant(id: string, reason: string): Promise<Res
     [id],
   );
 
+  return getRestaurant(id);
+}
+
+/**
+ * Mini-site autorisé ou non. Le retirer ferme aussitôt la page publique ;
+ * le rendre ne la rouvre pas : c'est au gérant de reprendre les commandes.
+ */
+export async function setOnlineAllowed(id: string, allowed: boolean): Promise<RestaurantSummary> {
+  const row = await queryOne(
+    `UPDATE restaurants
+        SET online_allowed = $2,
+            online_enabled = online_enabled AND $2
+      WHERE id = $1 RETURNING id`,
+    [id, allowed],
+  );
+  if (!row) throw notFound('Restaurant');
   return getRestaurant(id);
 }
 

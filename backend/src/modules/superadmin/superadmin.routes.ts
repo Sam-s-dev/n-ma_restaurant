@@ -18,3 +18,4 @@ superAdminRouter.get('/restaurants', asyncHandler(controller.listRestaurants));
 superAdminRouter.get('/restaurants/:id', asyncHandler(controller.getRestaurant));
 superAdminRouter.post('/restaurants/:id/activate', asyncHandler(controller.activateRestaurant));
 superAdminRouter.post('/restaurants/:id/disable', asyncHandler(controller.disableRestaurant));
+superAdminRouter.post('/restaurants/:id/online', asyncHandler(controller.setOnline));

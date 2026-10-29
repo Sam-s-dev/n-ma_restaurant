@@ -39,7 +39,7 @@ import { ROLE_LABELS } from '../../api/permissions';
 import type { Role } from '../../api/permissions';
 import { PAYMENT_LABELS } from '../../api/workspace/sales';
 import { parseAmount } from '../../utils/money';
-import { currentMonthISO, formatDateTime, formatFullDate, formatMonth, todayISO } from '../../utils/date';
+import { currentMonthISO, formatDateTime, formatFullDate, formatMonth, shiftDays, todayISO } from '../../utils/date';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { radius, screenPadding, spacing } from '../../theme/layout';
@@ -273,8 +273,11 @@ export function StaffScreen() {
 }
 
 // -------------------------------------------------------------------------
-// Pointage du jour
+// Pointage (l'appel) et son historique
 // -------------------------------------------------------------------------
+
+/** L'historique remonte un mois : assez pour la paie, sans tout charger. */
+const HISTORY_DAYS = 30;
 
 interface AttendanceBoardProps {
   employees: Employee[];
@@ -283,6 +286,10 @@ interface AttendanceBoardProps {
 
 function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
   const today = todayISO();
+  // Le jour affiché : aujourd'hui par défaut, ou un jour passé à consulter
+  // et corriger (un pointage oublié hier se rattrape ce matin).
+  const [day, setDay] = useState(today);
+  const [history, setHistory] = useState<Attendance[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AttendanceStatus>>({});
   /** Heure d'arrivée saisie pour un retard (« 09:40 »). */
   const [arrivals, setArrivals] = useState<Record<string, string>>({});
@@ -290,9 +297,24 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const loadHistory = useCallback(async () => {
     try {
-      const items = await listAttendances(today, today);
+      setHistory(await listAttendances(shiftDays(today, -HISTORY_DAYS), today));
+    } catch {
+      // L'historique est un complément : le pointage reste possible sans lui.
+    }
+  }, [today]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  const load = useCallback(async () => {
+    setStatuses({});
+    setArrivals({});
+    setSaved([]);
+    try {
+      const items = await listAttendances(day, day);
       setSaved(items);
       setStatuses(
         Object.fromEntries(items.map((item) => [item.employeeId, item.status])) as Record<
@@ -310,7 +332,7 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
     } catch {
       // Le pointage reste saisissable même si la lecture échoue.
     }
-  }, [today]);
+  }, [day]);
 
   useEffect(() => {
     void load();
@@ -336,9 +358,9 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
     setSaving(true);
     setError(null);
     try {
-      await markAttendances(today, entries);
-      notify('Pointage enregistré');
-      await load();
+      await markAttendances(day, entries);
+      notify(day === today ? 'Pointage enregistré' : `Pointage du ${formatFullDate(day)} corrigé`);
+      await Promise.all([load(), loadHistory()]);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Enregistrement impossible.');
     } finally {
@@ -363,10 +385,38 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
 
   return (
     <View style={styles.attendance}>
-      <SectionHeader
-        title={formatFullDate(today)}
-        caption={`${presentCount}/${employees.length} présent(s) · ${saved.length} déjà enregistré(s)`}
-      />
+      <View style={styles.dayNav}>
+        <Pressable
+          onPress={() => setDay((current) => shiftDays(current, -1))}
+          hitSlop={8}
+          style={styles.dayArrow}
+          accessibilityRole="button"
+          accessibilityLabel="Jour précédent"
+        >
+          <Icon name="chevron-left" size={18} color={colors.textPrimary} />
+        </Pressable>
+        <View style={styles.dayTitle}>
+          <SectionHeader
+            title={day === today ? `Aujourd’hui · ${formatFullDate(day)}` : formatFullDate(day)}
+            caption={`${presentCount}/${employees.length} présent(s) · ${saved.length} déjà enregistré(s)`}
+          />
+        </View>
+        <Pressable
+          onPress={() => setDay((current) => (current < today ? shiftDays(current, 1) : current))}
+          disabled={day >= today}
+          hitSlop={8}
+          style={[styles.dayArrow, day >= today && styles.dayArrowOff]}
+          accessibilityRole="button"
+          accessibilityLabel="Jour suivant"
+        >
+          <Icon name="chevron-right" size={18} color={colors.textPrimary} />
+        </Pressable>
+      </View>
+      {day !== today && (
+        <Pressable onPress={() => setDay(today)} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.backToday}>Revenir à aujourd’hui</Text>
+        </Pressable>
+      )}
 
       <Card reveal={2}>
         {employees.map((employee, index) => {
@@ -449,12 +499,101 @@ function AttendanceBoard({ employees, notify }: AttendanceBoardProps) {
 
       <View style={styles.attendanceAction}>
         <Button
-          label="Enregistrer le pointage"
+          label={day === today ? 'Enregistrer le pointage' : 'Corriger ce pointage'}
           onPress={save}
           loading={saving}
           disabled={Object.keys(statuses).length === 0}
         />
       </View>
+
+      <AttendanceHistory items={history} employees={employees.length} selected={day} onSelect={setDay} />
+    </View>
+  );
+}
+
+/**
+ * L'historique des appels : un jour par ligne, avec qui était là, qui est
+ * arrivé en retard et qui manquait. Toucher un jour l'ouvre au-dessus.
+ */
+function AttendanceHistory({
+  items,
+  employees,
+  selected,
+  onSelect,
+}: {
+  items: Attendance[];
+  employees: number;
+  selected: string;
+  onSelect: (day: string) => void;
+}) {
+  const days = new Map<string, Attendance[]>();
+  for (const item of items) {
+    const list = days.get(item.day) ?? [];
+    list.push(item);
+    days.set(item.day, list);
+  }
+  const ordered = [...days.entries()].sort(([a], [b]) => (a < b ? 1 : -1));
+  const lateTotal = items.filter((item) => item.status === 'late').length;
+  const absentTotal = items.filter((item) => item.status === 'absent').length;
+
+  return (
+    <View style={styles.history}>
+      <SectionHeader
+        title="Historique des appels"
+        caption={`${HISTORY_DAYS} derniers jours · ${lateTotal} retard(s) · ${absentTotal} absence(s)`}
+      />
+      {ordered.length === 0 ? (
+        <EmptyState
+          icon="calendar"
+          title="Aucun appel enregistré"
+          message="Chaque pointage enregistré apparaît ici, jour par jour."
+        />
+      ) : (
+        <Card>
+          {ordered.map(([day, list], index) => {
+            const names = (status: AttendanceStatus) =>
+              list
+                .filter((item) => item.status === status)
+                .map((item) =>
+                  status === 'late' && item.arrivalTime
+                    ? `${item.employeeName ?? '—'} (${item.arrivalTime})`
+                    : (item.employeeName ?? '—'),
+                );
+            const late = names('late');
+            const absent = names('absent');
+            const leave = names('leave');
+            const present = list.filter((item) => item.status === 'present').length + late.length;
+            const details = [
+              late.length > 0 ? `Retard : ${late.join(', ')}` : null,
+              absent.length > 0 ? `Absent : ${absent.join(', ')}` : null,
+              leave.length > 0 ? `Congé : ${leave.join(', ')}` : null,
+            ].filter(Boolean);
+            const tone =
+              absent.length > 0
+                ? ATTENDANCE_TONES.absent
+                : late.length > 0
+                  ? ATTENDANCE_TONES.late
+                  : ATTENDANCE_TONES.present;
+
+            return (
+              <View key={day} style={day === selected ? styles.historySelected : undefined}>
+                {index > 0 && <RowDivider />}
+                <ListRow
+                  icon="calendar"
+                  iconColor={tone.color}
+                  iconBackground={tone.background}
+                  title={formatFullDate(day)}
+                  subtitle={details.length > 0 ? details.join('\n') : 'Tout le monde était là'}
+                  subtitleLines={3}
+                  value={`${present}/${Math.max(employees, list.length)}`}
+                  valueCaption="présents"
+                  onPress={() => onSelect(day)}
+                />
+              </View>
+            );
+          })}
+        </Card>
+      )}
     </View>
   );
 }
@@ -972,6 +1111,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: colors.textOnPrimary,
+  },
+  dayNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dayTitle: {
+    flex: 1,
+  },
+  dayArrow: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayArrowOff: {
+    opacity: 0.3,
+  },
+  backToday: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.primary,
+    marginBottom: spacing.md,
+  },
+  history: {
+    marginTop: spacing.xxl,
+  },
+  historySelected: {
+    backgroundColor: colors.primarySoft,
+    marginHorizontal: -spacing.xl,
+    paddingHorizontal: spacing.xl,
   },
   attendance: {
     marginTop: spacing.lg,

@@ -19,6 +19,8 @@ export interface Dish {
   photoUrl: string | null;
   price: number;
   isAvailable: boolean;
+  /** Proposé sur le mini-site de commande en ligne. */
+  isOnline: boolean;
   isArchived: boolean;
   /** Portions restantes ; null quand la quantité n'est pas suivie (§5). */
   availableQuantity: number | null;
@@ -30,6 +32,7 @@ export interface DishPayload {
   categoryId?: string | null;
   description?: string | null;
   isAvailable?: boolean;
+  isOnline?: boolean;
   photoMediaId?: string | null;
   availableQuantity?: number | null;
 }

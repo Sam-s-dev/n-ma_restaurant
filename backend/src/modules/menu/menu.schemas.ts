@@ -1,27 +1,44 @@
 import { z } from 'zod';
 
-export const createCategorySchema = z.object({
+const categoryFields = {
   name: z.string().trim().min(1).max(80),
-  position: z.coerce.number().int().min(0).max(999).default(0),
+  position: z.coerce.number().int().min(0).max(999),
+};
+
+export const createCategorySchema = z.object({
+  ...categoryFields,
+  position: categoryFields.position.default(0),
 });
 
-export const updateCategorySchema = createCategorySchema.partial();
+export const updateCategorySchema = z.object(categoryFields).partial();
 
-export const createDishSchema = z.object({
+const dishFields = {
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500).nullable().optional(),
   categoryId: z.string().uuid().nullable().optional(),
   photoMediaId: z.string().uuid().nullable().optional(),
   price: z.coerce.number().min(0).max(9_999_999_999),
-  isAvailable: z.boolean().default(true),
+  isAvailable: z.boolean(),
+  /** Proposé sur le mini-site de commande en ligne. */
+  isOnline: z.boolean(),
   /**
    * §5 — Portions préparées. `null` laisse le plat vendable sans limite
    * (préparé à la commande) ; un nombre le fait décompter à chaque vente.
    */
   availableQuantity: z.coerce.number().int().min(0).max(99_999).nullable().optional(),
+};
+
+export const createDishSchema = z.object({
+  ...dishFields,
+  isAvailable: dishFields.isAvailable.default(true),
+  isOnline: dishFields.isOnline.default(true),
 });
 
-export const updateDishSchema = createDishSchema.partial();
+/**
+ * Sans valeurs par défaut : Zod 4 les appliquerait aux champs absents, et
+ * renommer un plat le remettrait « disponible » et en ligne.
+ */
+export const updateDishSchema = z.object(dishFields).partial();
 
 /** §5 — bascule rapide « disponible / en rupture » depuis la liste du menu. */
 export const setAvailabilitySchema = z.object({

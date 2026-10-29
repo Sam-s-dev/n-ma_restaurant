@@ -3,6 +3,12 @@ export function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/** Montant lisible dans une notification : « 85 000 FG ». */
+export function formatAmount(value: number, symbol: string): string {
+  const digits = Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${digits} ${symbol}`;
+}
+
 /** Arrondi des quantités de stock à 3 décimales (kg, litres...). */
 export function round3(value: number): number {
   return Math.round((value + Number.EPSILON) * 1000) / 1000;

@@ -15,6 +15,8 @@ export const activateSchema = z.object({
   reason: z.string().trim().max(255).optional(),
 });
 
+export const onlineSchema = z.object({ allowed: z.boolean() });
+
 export const disableSchema = z.object({
   reason: z.string().trim().min(3).max(255),
 });

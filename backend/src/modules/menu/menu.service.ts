@@ -101,6 +101,7 @@ export interface Dish {
   price: number;
   isAvailable: boolean;
   isArchived: boolean;
+  isOnline: boolean;
   /** Portions restantes ; null quand la quantité n'est pas suivie (§5). */
   availableQuantity: number | null;
 }
@@ -115,6 +116,7 @@ interface DishRow {
   price: number;
   is_available: boolean;
   is_archived: boolean;
+  is_online: boolean;
   available_quantity: number | null;
 }
 
@@ -129,13 +131,14 @@ const toDish = (row: DishRow): Dish => ({
   price: row.price,
   isAvailable: row.is_available,
   isArchived: row.is_archived,
+  isOnline: row.is_online,
   availableQuantity: row.available_quantity,
 });
 
 const DISH_SELECT = `
   SELECT d.id, d.name, d.description, d.category_id, c.name AS category_name,
          d.photo_media_id, d.price, d.is_available, d.is_archived,
-         d.available_quantity
+         d.is_online, d.available_quantity
     FROM dishes d
     LEFT JOIN menu_categories c ON c.id = d.category_id`;
 
@@ -189,8 +192,8 @@ export async function createDish(restaurantId: string, input: CreateDishInput): 
   const row = await queryOne<{ id: string }>(
     `INSERT INTO dishes
        (restaurant_id, name, description, category_id, photo_media_id, price,
-        is_available, available_quantity)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        is_available, available_quantity, is_online)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id`,
     [
       restaurantId,
@@ -203,6 +206,7 @@ export async function createDish(restaurantId: string, input: CreateDishInput): 
       // vente pour le refuser aussitôt n'aurait aucun sens.
       input.availableQuantity === 0 ? false : input.isAvailable,
       input.availableQuantity ?? null,
+      input.isOnline,
     ],
   );
   if (!row) throw new Error('Création du plat impossible.');
@@ -238,6 +242,7 @@ export async function updateDish(
     price: 'price',
     isAvailable: 'is_available',
     availableQuantity: 'available_quantity',
+    isOnline: 'is_online',
   });
 
   const row = await queryOne<{ id: string }>(

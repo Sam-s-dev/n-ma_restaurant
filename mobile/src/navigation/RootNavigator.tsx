@@ -14,6 +14,8 @@ import { invalidateCache } from '../api/cache';
 import { clearSession, loadSession } from '../api/session';
 import { clearAdminSession, loadAdminSession } from '../api/adminSession';
 import type { StoredAdminSession } from '../api/adminSession';
+import { PublicSite } from '../screens/public/PublicSite';
+import { currentPublicRoute } from '../utils/publicRoute';
 import { colors } from '../theme/colors';
 
 export type RootStackParamList = {
@@ -32,6 +34,19 @@ interface RootNavigatorProps {
 }
 
 export function RootNavigator({ onReady }: RootNavigatorProps) {
+  // Un client arrivé par le lien d'un restaurant voit son mini-site, rien
+  // d'autre : ni page d'accueil, ni connexion.
+  const [publicRoute] = useState(currentPublicRoute);
+  if (publicRoute) return <PublicEntry route={publicRoute} onReady={onReady} />;
+  return <StaffNavigator onReady={onReady} />;
+}
+
+function PublicEntry({ route, onReady }: { route: NonNullable<ReturnType<typeof currentPublicRoute>>; onReady: () => void }) {
+  useEffect(onReady, [onReady]);
+  return <PublicSite initial={route} />;
+}
+
+function StaffNavigator({ onReady }: RootNavigatorProps) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [adminSession, setAdminSession] = useState<StoredAdminSession | null>(null);
   const [restoring, setRestoring] = useState(true);

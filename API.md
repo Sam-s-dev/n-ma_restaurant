@@ -68,29 +68,32 @@ restaurant concerné.
 
 ### Rôles
 
-Chaque compte a un rôle : `manager` (gérant), `cashier` (caissier) ou
-`storekeeper` (magasinier). Les droits sont fixes par rôle et définis dans
+Chaque compte a un rôle : `manager` (gérant), `cashier` (caissier),
+`storekeeper` (magasinier) ou `driver` (livreur). Les droits sont fixes par rôle et définis dans
 [backend/src/core/permissions.ts](backend/src/core/permissions.ts). Le profil
 renvoyé par `/api/auth/login` et `/api/auth/me` contient `user.role` et
 `user.permissions`. L'application mobile s'en sert pour masquer ce qui serait
 refusé, mais c'est le serveur qui contrôle : toute action interdite répond `403`.
 
-| | Gérant | Caissier | Magasinier |
-|---|:-:|:-:|:-:|
-| Encaisser, imprimer un ticket | ✅ | ✅ (ses propres ventes, caisse ouverte) | — |
-| Ouvrir et clôturer la caisse (comptage à l'aveugle) | ✅ | ✅ | — |
-| Historique des clôtures, correction d'écart, rapports et exports | ✅ | — | — |
-| Annuler une vente, prix libre, vente antidatée | ✅ | — | — |
-| Clients (sauf suppression), créances, remboursements | ✅ | ✅ | — |
-| Consulter le menu, marquer un plat disponible ou épuisé | ✅ | ✅ | — |
-| Créer ou modifier un plat, gérer les catégories | ✅ | — | — |
-| Stock : consulter, corriger, déclarer une perte | ✅ | — | ✅ |
-| Voir le solde de la caisse (sans les cumuls ni les mouvements) | ✅ | — | ✅ |
-| Demander un achat, l'effectuer une fois approuvé | ✅ | — | ✅ (ses demandes seulement) |
-| Approuver ou refuser une demande d'achat | ✅ | — | — |
-| Dépenses (toutes catégories), annulation de dépense | ✅ | — | — |
-| Caisse détaillée, tableau de bord, plats vedettes | ✅ | — | — |
-| Personnel et salaires, équipe, paramètres, journal | ✅ | — | — |
+| | Gérant | Caissier | Magasinier | Livreur |
+|---|:-:|:-:|:-:|:-:|
+| Encaisser, imprimer un ticket | ✅ | ✅ (ses propres ventes, caisse ouverte) | — | — |
+| Commandes en ligne : accepter, confier au livreur, encaisser | ✅ | ✅ | — | — |
+| Ses courses : partir, livrer, signaler un problème | — | — | — | ✅ |
+| Réglages du mini-site et zones de livraison | ✅ | — | — | — |
+| Ouvrir et clôturer la caisse (comptage à l'aveugle) | ✅ | ✅ | — | — |
+| Historique des clôtures, correction d'écart, rapports et exports | ✅ | — | — | — |
+| Annuler une vente, prix libre, vente antidatée | ✅ | — | — | — |
+| Clients (sauf suppression), créances, remboursements | ✅ | ✅ | — | — |
+| Consulter le menu, marquer un plat disponible ou épuisé | ✅ | ✅ | — | — |
+| Créer ou modifier un plat, gérer les catégories | ✅ | — | — | — |
+| Stock : consulter, corriger, déclarer une perte | ✅ | — | ✅ | — |
+| Voir le solde de la caisse (sans les cumuls ni les mouvements) | ✅ | — | ✅ | — |
+| Demander un achat, l'effectuer une fois approuvé | ✅ | — | ✅ (ses demandes seulement) | — |
+| Approuver ou refuser une demande d'achat | ✅ | — | — | — |
+| Dépenses (toutes catégories), annulation de dépense | ✅ | — | — | — |
+| Caisse détaillée, tableau de bord, plats vedettes | ✅ | — | — | — |
+| Personnel et salaires, équipe, paramètres, journal | ✅ | — | — | — |
 
 - Le créateur de l'espace reste gérant ; personne ne peut changer son propre rôle.
 - Le rôle est relu à chaque requête : un changement s'applique immédiatement.
@@ -273,6 +276,65 @@ automatiquement à l'inscription.
 | `GET` | `/api/reports/export.xlsx?from=&to=` | Classeur Excel : Synthèse, Ventes, Dépenses, Caisse, Créances, Salaires, Clôtures |
 
 Période d'un an au plus. Chaque export est inscrit au journal (`report.exported`).
+
+---
+
+## Mini-site et commandes en ligne
+
+Chaque restaurant a sa propre adresse publique, `/r/<slug>` sur la version
+web, ses zones de livraison, ses commandes et ses livreurs. Rien n'est
+partagé entre restaurants.
+
+### Pages publiques (sans compte)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/public/r/:slug` | Carte en ligne : restaurant, ouverture, zones, plats proposés |
+| `POST` | `/api/public/r/:slug/orders` | Passer commande (8 par quart d'heure et par adresse IP) |
+| `GET` | `/api/public/orders/:code` | Suivi de la commande par son code |
+| `POST` | `/api/public/orders/:code/cancel` | Annulation par le client, tant qu'elle n'est pas acceptée |
+
+- Le mini-site répond `404` si le restaurant n'est pas actif, si l'éditeur ne
+  l'a pas autorisé ou s'il n'a pas d'adresse.
+- Les prix et frais de livraison viennent toujours du serveur.
+- Une livraison exige une zone active et un point de repère.
+- Trois commandes en attente au plus par numéro de téléphone (`429` au-delà).
+
+### Réglages (`/api/online`)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` / `PATCH` | `/settings` | Adresse, ouverture, livraison / retrait, horaires (heure de Conakry), message |
+| `GET` / `POST` | `/zones` | Zones de livraison et leur prix |
+| `PATCH` / `DELETE` | `/zones/:id` | Modifier, suspendre ou supprimer une zone |
+
+Un plat porte `isOnline` : il n'apparaît sur le mini-site que s'il est coché.
+
+### Commandes (`/api/orders`, droit `orders.manage`)
+
+`pending` → `accepted` (portions réservées) → `ready` → `out_for_delivery` →
+`delivered` (argent chez le livreur) → `completed` (vente créée, caisse
+créditée). Ou `rejected` / `cancelled` (les portions reviennent au plat).
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/?group=active\|to_settle\|closed` | Commandes à traiter, à encaisser, closes (7 jours) |
+| `GET` | `/drivers` | Livreurs : courses en cours et argent à reverser |
+| `POST` | `/:id/accept`, `/:id/reject`, `/:id/ready`, `/:id/cancel` | Étapes de la commande |
+| `POST` | `/:id/assign` | Confier à un livreur `{ driverId }` |
+| `POST` | `/:id/complete` | L'argent est en caisse : crée la vente (caisse ouverte exigée pour le caissier) |
+
+### Livreur (`/api/deliveries`, droit `deliveries.handle`)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/` | Ses courses et le montant à reverser |
+| `POST` | `/:id/dispatch` | Il part avec la commande |
+| `POST` | `/:id/deliver` | Livrée `{ collectedMethod: cash \| mobile_money }` |
+| `POST` | `/:id/issue` | Problème : la commande revient au restaurant |
+
+Le Super Admin autorise ou retire le mini-site d'un restaurant :
+`POST /api/super-admin/restaurants/:id/online { allowed }`.
 
 ---
 

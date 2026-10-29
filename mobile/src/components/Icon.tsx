@@ -51,6 +51,8 @@ export type IconName =
   | 'send'
   | 'bell'
   | 'cart'
+  | 'truck'
+  | 'globe'
   | 'more';
 
 interface IconProps {
@@ -408,6 +410,25 @@ function renderPaths(name: IconName, s: StrokeProps, color: string) {
           <Path d="M2.5 3.5h2.8l2.4 11.2a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.6-1.2l1.7-7.3H6.2" {...s} />
           <Circle cx="9.5" cy="20" r="1.3" {...s} />
           <Circle cx="17.5" cy="20" r="1.3" {...s} />
+        </>
+      );
+
+    case 'truck':
+      return (
+        <>
+          <Path d="M2.5 5.5h11v10.5h-11z" {...s} />
+          <Path d="M13.5 9h4l3 3.5V16h-7" {...s} />
+          <Circle cx="7" cy="18" r="1.8" {...s} />
+          <Circle cx="17" cy="18" r="1.8" {...s} />
+        </>
+      );
+
+    case 'globe':
+      return (
+        <>
+          <Circle cx="12" cy="12" r="9" {...s} />
+          <Path d="M3 12h18" {...s} />
+          <Path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" {...s} />
         </>
       );
 

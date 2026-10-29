@@ -22,7 +22,7 @@ export interface AuditPage {
 }
 
 /** Familles d'actions proposées en filtre : le serveur filtre par préfixe. */
-export type AuditFamily = 'sale' | 'cash' | 'expense' | 'dish' | 'member' | 'salary';
+export type AuditFamily = 'sale' | 'cash' | 'expense' | 'dish' | 'member' | 'salary' | 'order';
 
 export function listAudit(
   filters: { page?: number; limit?: number; action?: AuditFamily; userId?: string } = {},

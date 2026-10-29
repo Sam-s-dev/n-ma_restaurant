@@ -2,9 +2,9 @@ import type { QueryResultRow } from 'pg';
 import { badRequest, conflict, notFound, unprocessable } from '../../core/errors';
 import { offsetOf, paginate, type Paginated } from '../../core/pagination';
 import { query, queryOne } from '../../db/pool';
-import { withTransaction } from '../../db/transaction';
+import { withTransaction, type Tx } from '../../db/transaction';
 import { round2 } from '../../utils/money';
-import { recordMovement, reverseMovements } from '../cash/cash.service';
+import { recordMovement, reverseMovements, type PaymentMethod } from '../cash/cash.service';
 import { resolveOrCreateCustomer } from '../customers/customers.service';
 import { notify } from '../notifications/notifications.service';
 import type { CreateSaleInput, ListSalesInput } from './sales.schemas';
@@ -169,53 +169,18 @@ export async function createSale(
       });
     }
 
-    // 4. Numéro de ticket lisible.
+    // 4 et 5. Ticket, lignes (nom et prix figés) et encaissement.
     const soldAt = input.soldAt ?? new Date();
-    const refRow = await tx.queryOne<{ reference: string }>(
-      `SELECT next_document_reference($1, 'sale', 'V', $2::date) AS reference`,
-      [restaurantId, soldAt.toISOString().slice(0, 10)],
-    );
-    const reference = refRow?.reference ?? `V-${Date.now()}`;
-
-    const status = input.paymentMethod === 'credit' ? 'credit' : 'paid';
-
-    const sale = await tx.queryOne<{ id: string }>(
-      `INSERT INTO sales
-         (restaurant_id, reference, total_amount, payment_method, status,
-          customer_id, note, sold_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id`,
-      [
-        restaurantId,
-        reference,
-        totalAmount,
-        input.paymentMethod,
-        status,
-        customerId,
-        input.note ?? null,
-        soldAt,
-        userId,
-      ],
-    );
-    if (!sale) throw new Error('Création de la vente impossible.');
-
-    // 5. Lignes de vente (nom et prix figés).
-    for (const line of lines) {
-      await tx.query(
-        `INSERT INTO sale_items
-           (restaurant_id, sale_id, dish_id, dish_name, unit_price, quantity, line_total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          restaurantId,
-          sale.id,
-          line.dishId,
-          line.dishName,
-          line.unitPrice,
-          line.quantity,
-          line.lineTotal,
-        ],
-      );
-    }
+    const sale = await insertSaleRecord(tx, {
+      restaurantId,
+      userId,
+      lines,
+      totalAmount,
+      paymentMethod: input.paymentMethod,
+      customerId,
+      note: input.note ?? null,
+      soldAt,
+    });
 
     // 5 bis. Décompte des portions (§5). Le plat qui tombe à zéro sort de la
     // carte dans la foulée : la caisse le refuserait de toute façon, autant
@@ -232,31 +197,92 @@ export async function createSale(
     }
 
     if (input.paymentMethod === 'credit') {
-      // 6a. Créance ouverte : aucun mouvement de caisse (§8).
+      // 6. Créance ouverte : aucun mouvement de caisse (§8).
       await tx.query(
         `INSERT INTO credits
            (restaurant_id, sale_id, customer_id, amount_due, due_date, opened_at)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [restaurantId, sale.id, customerId, totalAmount, input.dueDate ?? null, soldAt],
       );
-    } else if (totalAmount > 0) {
-      // 6b. Vente encaissée : + Caisse (§7, §10).
-      await recordMovement(tx, {
-        restaurantId,
-        direction: 'in',
-        amount: totalAmount,
-        category: 'sale',
-        label: `Vente ${reference}`,
-        sourceType: 'sale',
-        sourceId: sale.id,
-        paymentMethod: input.paymentMethod,
-        occurredAt: soldAt,
-        createdBy: userId,
-      });
     }
 
     return loadSale(restaurantId, sale.id, tx.query.bind(tx));
   });
+}
+
+export interface SaleLine {
+  dishId: string | null;
+  dishName: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+/**
+ * Écrit la vente, ses lignes et, si elle est encaissée, l'entrée en
+ * caisse. Les contrôles (plats, portions, client) restent à l'appelant :
+ * la caisse les fait au comptoir, la commande en ligne à l'acceptation.
+ */
+export async function insertSaleRecord(
+  tx: Tx,
+  params: {
+    restaurantId: string;
+    userId: string;
+    lines: SaleLine[];
+    totalAmount: number;
+    paymentMethod: string;
+    customerId: string | null;
+    note: string | null;
+    soldAt: Date;
+  },
+): Promise<{ id: string; reference: string }> {
+  const { restaurantId, userId, lines, totalAmount, paymentMethod, soldAt } = params;
+
+  // Numéro de ticket lisible.
+  const refRow = await tx.queryOne<{ reference: string }>(
+    `SELECT next_document_reference($1, 'sale', 'V', $2::date) AS reference`,
+    [restaurantId, soldAt.toISOString().slice(0, 10)],
+  );
+  const reference = refRow?.reference ?? `V-${Date.now()}`;
+
+  const status = paymentMethod === 'credit' ? 'credit' : 'paid';
+
+  const sale = await tx.queryOne<{ id: string }>(
+    `INSERT INTO sales
+       (restaurant_id, reference, total_amount, payment_method, status,
+        customer_id, note, sold_at, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id`,
+    [restaurantId, reference, totalAmount, paymentMethod, status, params.customerId, params.note, soldAt, userId],
+  );
+  if (!sale) throw new Error('Création de la vente impossible.');
+
+  for (const line of lines) {
+    await tx.query(
+      `INSERT INTO sale_items
+         (restaurant_id, sale_id, dish_id, dish_name, unit_price, quantity, line_total)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [restaurantId, sale.id, line.dishId, line.dishName, line.unitPrice, line.quantity, line.lineTotal],
+    );
+  }
+
+  // Vente encaissée : + Caisse (§7, §10).
+  if (status === 'paid' && totalAmount > 0) {
+    await recordMovement(tx, {
+      restaurantId,
+      direction: 'in',
+      amount: totalAmount,
+      category: 'sale',
+      label: `Vente ${reference}`,
+      sourceType: 'sale',
+      sourceId: sale.id,
+      paymentMethod: paymentMethod as PaymentMethod,
+      occurredAt: soldAt,
+      createdBy: userId,
+    });
+  }
+
+  return { id: sale.id, reference };
 }
 
 type Querier = <T extends QueryResultRow>(text: string, params?: unknown[]) => Promise<T[]>;

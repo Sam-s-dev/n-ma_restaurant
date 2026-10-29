@@ -8,13 +8,14 @@
  * le serveur, lui, refuse quoi qu'il arrive.
  */
 
-export const ROLES = ['manager', 'cashier', 'storekeeper'] as const;
+export const ROLES = ['manager', 'cashier', 'storekeeper', 'driver'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   manager: 'Gérant',
   cashier: 'Caissier',
   storekeeper: 'Magasinier',
+  driver: 'Livreur',
 };
 
 export const PERMISSIONS = [
@@ -44,6 +45,9 @@ export const PERMISSIONS = [
   'cash.view', // solde, mouvements et répartition
   'cash.manage',
   'cash.session', // ouvrir et clôturer la caisse (comptage à l'aveugle)
+  // Commandes en ligne
+  'orders.manage', // accepter, préparer, confier au livreur, encaisser
+  'deliveries.handle', // ses propres courses, et rien d'autre
   'dashboard.view',
   'reports.export',
   // Administration
@@ -55,8 +59,9 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
-  // Le gérant fait tout, y compris la comptabilité : pas de rôle à part.
-  manager: new Set(PERMISSIONS),
+  // Le gérant fait tout, y compris la comptabilité. Il ne reçoit pas de
+  // courses : livrer est le métier du livreur.
+  manager: new Set(PERMISSIONS.filter((permission) => permission !== 'deliveries.handle')),
 
   // Le caissier sert les clients. Il ne voit ni le solde de la caisse ni
   // les chiffres du restaurant, seulement ses propres ventes.
@@ -68,6 +73,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'credits.repay',
     'menu.view',
     'menu.availability',
+    'orders.manage',
   ]),
 
   // Le magasinier tient le stock. Il voit ce qu'il y a en caisse pour
@@ -78,6 +84,10 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'cash.balance',
     'purchases.request',
   ]),
+
+  // Le livreur ne voit que les courses qu'on lui confie : l'adresse, le
+  // téléphone du client et le montant à encaisser.
+  driver: new Set<Permission>(['deliveries.handle']),
 };
 
 export function isRole(value: unknown): value is Role {

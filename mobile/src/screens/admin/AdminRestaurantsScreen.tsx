@@ -19,6 +19,7 @@ import { ApiError, mediaUrl, THUMB } from '../../api/client';
 import {
   activateRestaurant,
   disableRestaurant,
+  setOnlineAllowed,
   listRestaurants,
   stats as fetchStats,
 } from '../../api/superadmin';
@@ -129,6 +130,21 @@ export function AdminRestaurantsScreen({
     }
   }
 
+  async function toggleOnline(restaurant: RestaurantSummary) {
+    setError(null);
+    try {
+      const updated = await setOnlineAllowed(token, restaurant.id, !restaurant.onlineAllowed);
+      setNotice(
+        updated.onlineAllowed
+          ? `${updated.name} peut ouvrir son mini-site de commande.`
+          : `Le mini-site de ${updated.name} est fermé.`,
+      );
+      await load({ silent: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Opération impossible.');
+    }
+  }
+
   const pendingCount = counts?.restaurants_pending ?? 0;
 
   return (
@@ -232,6 +248,7 @@ export function AdminRestaurantsScreen({
               setNotice(null);
               setAction({ type: 'disable', restaurant: item });
             }}
+            onToggleOnline={() => void toggleOnline(item)}
           />
         )}
         ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
@@ -295,10 +312,12 @@ function RestaurantCard({
   restaurant,
   onActivate,
   onDisable,
+  onToggleOnline,
 }: {
   restaurant: RestaurantSummary;
   onActivate: () => void;
   onDisable: () => void;
+  onToggleOnline: () => void;
 }) {
   const logo = mediaUrl(restaurant.logoMediaId, THUMB.small);
   const initials = restaurant.name
@@ -344,6 +363,10 @@ function RestaurantCard({
         <Meta label="Inscrit le" value={createdAt} />
         <Meta label="Utilisateurs" value={String(restaurant.usersCount)} />
         <Meta label="Ventes" value={String(restaurant.salesCount)} />
+        <Meta
+          label="Mini-site"
+          value={!restaurant.onlineAllowed ? 'Interdit' : restaurant.onlineEnabled ? 'Ouvert' : 'Fermé'}
+        />
       </View>
 
       {Boolean(restaurant.statusReason) && restaurant.status === 'disabled' && (
@@ -356,6 +379,11 @@ function RestaurantCard({
         ) : (
           <Button label="Activer le compte" onPress={onActivate} variant="primary" />
         )}
+        <Button
+          label={restaurant.onlineAllowed ? 'Interdire le mini-site' : 'Autoriser le mini-site'}
+          onPress={onToggleOnline}
+          variant="ghost"
+        />
       </View>
     </View>
   );
@@ -551,6 +579,7 @@ const styles = StyleSheet.create({
   },
   cardActions: {
     marginTop: spacing.lg,
+    gap: spacing.sm,
   },
 
   loader: {

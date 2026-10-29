@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');
 
-export const createEmployeeSchema = z.object({
+const employeeFields = {
   fullName: z.string().trim().min(2).max(120),
   position: z.string().trim().min(2).max(80),
   phone: z
@@ -14,12 +14,19 @@ export const createEmployeeSchema = z.object({
     .nullable()
     .optional(),
   hireDate: isoDate,
-  monthlySalary: z.coerce.number().min(0).max(9_999_999_999).default(0),
+  monthlySalary: z.coerce.number().min(0).max(9_999_999_999),
   photoMediaId: z.string().uuid().nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
+};
+
+export const createEmployeeSchema = z.object({
+  ...employeeFields,
+  monthlySalary: employeeFields.monthlySalary.default(0),
 });
 
-export const updateEmployeeSchema = createEmployeeSchema.partial().extend({
+// Sans valeur par défaut : Zod 4 l'appliquerait à un champ absent, et
+// corriger le nom d'un employé remettrait son salaire à zéro.
+export const updateEmployeeSchema = z.object(employeeFields).partial().extend({
   isActive: z.boolean().optional(),
   endDate: isoDate.nullable().optional(),
 });
