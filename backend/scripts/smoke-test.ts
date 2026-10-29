@@ -1966,14 +1966,20 @@ async function main(): Promise<void> {
   });
   check('le serveur n’annule pas un plat envoyé (403)', deniedCancel.status === 403, deniedCancel.status);
 
-  const requested = await call('POST', `/api/bills/${billA.body?.id}/request`, { token: waiter });
-  check('le serveur demande l’addition', requested.body?.status === 'bill_requested', requested.body);
+  const allServed = await call('GET', `/api/bills/${billA.body?.id}`, { token: waiter });
+  check(
+    'tout est servi : l’addition passe seule « à encaisser »',
+    allServed.body?.status === 'bill_requested',
+    allServed.body?.status,
+  );
   const tillInbox = await call('GET', '/api/notifications', { token: till });
   check(
     'le caissier est prévenu, avec le montant',
-    tillInbox.body?.items?.some((n: any) => n.kind === 'bill.requested' && n.body.includes('55 000')),
+    tillInbox.body?.items?.some((n: any) => n.kind === 'bill.requested' && n.body.includes('Tout est servi') && n.body.includes('55 000')),
     tillInbox.body?.items?.map((n: any) => n.body),
   );
+  const requestAgain = await call('POST', `/api/bills/${billA.body?.id}/request`, { token: waiter });
+  check('inutile de la redemander (409)', requestAgain.status === 409, requestAgain.body);
 
   const toSettle = await call('GET', '/api/bills', { token: till });
   check(

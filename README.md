@@ -9,7 +9,7 @@ l'ordre prévu au §12 : base de données, puis backend, puis conteneur Docker.
 Le design de l'application mobile Expo viendra ensuite, une fois le backend
 stabilisé.
 
-**État : backend complet et fonctionnel.** 345 vérifications de bout en bout
+**État : backend complet et fonctionnel.** 346 vérifications de bout en bout
 passent sur les conteneurs Docker (`npm run smoke`).
 
 ---

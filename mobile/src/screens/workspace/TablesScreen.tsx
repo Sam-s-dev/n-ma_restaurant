@@ -545,7 +545,11 @@ function BillView({ billId, onBack }: { billId: string; onBack: () => void }) {
 
         {bill.status === 'bill_requested' && (
           <View style={styles.block}>
-            <Banner tone="info" title="Addition demandée" message="Le caissier est prévenu. Vous pouvez encore ajouter des plats : l’addition se rouvrira." />
+            <Banner
+              tone="info"
+              title="Chez le caissier, à encaisser"
+              message="Tout est servi ou l’addition a été demandée : le caissier est prévenu. Un plat ajouté maintenant rouvre l’addition."
+            />
           </View>
         )}
         {bill.status === 'paid' && (

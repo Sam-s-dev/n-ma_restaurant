@@ -553,29 +553,46 @@ export async function requestBill(actor: Actor, billId: string): Promise<Bill> {
       throw unprocessable('Aucun plat sur cette addition.');
     }
 
-    await tx.query(
-      `UPDATE table_bills SET status = 'bill_requested', bill_requested_at = now() WHERE id = $1`,
-      [billId],
-    );
-
-    const symbol = await currencyOf(tx, actor.restaurantId);
-    await notifyRoleOrFallback(
-      {
-        restaurantId: actor.restaurantId,
-        roles: ['cashier'],
-        fallback: 'bills.settle',
-        exceptUserId: actor.userId,
-        kind: 'bill.requested',
-        title: `Addition demandée · ${billName(bill.table_name, bill.label, bill.reference)}`,
-        body: `${formatAmount(current.total, symbol)} à encaisser.`,
-        route: 'bills',
-        entityId: billId,
-        actorName: actor.userName,
-      },
-      tx,
-    );
+    await sendToCashier(tx, actor, bill, current.total, 'requested');
     return getBill(actor.restaurantId, billId, tx);
   });
+}
+
+/**
+ * L'addition passe « à encaisser » et le caissier est prévenu : soit le
+ * serveur la demande, soit tout vient d'être servi.
+ */
+async function sendToCashier(
+  tx: Tx,
+  actor: Actor,
+  bill: { id: string; reference: string; label: string | null; table_name: string },
+  total: number,
+  reason: 'requested' | 'all_served',
+) {
+  await tx.query(
+    `UPDATE table_bills SET status = 'bill_requested', bill_requested_at = now() WHERE id = $1`,
+    [bill.id],
+  );
+  const symbol = await currencyOf(tx, actor.restaurantId);
+  const name = billName(bill.table_name, bill.label, bill.reference);
+  await notifyRoleOrFallback(
+    {
+      restaurantId: actor.restaurantId,
+      roles: ['cashier'],
+      fallback: 'bills.settle',
+      exceptUserId: actor.userId,
+      kind: 'bill.requested',
+      title: reason === 'all_served' ? `À encaisser · ${name}` : `Addition demandée · ${name}`,
+      body:
+        reason === 'all_served'
+          ? `Tout est servi : ${formatAmount(total, symbol)} à encaisser.`
+          : `${formatAmount(total, symbol)} à encaisser.`,
+      route: 'bills',
+      entityId: bill.id,
+      actorName: actor.userName,
+    },
+    tx,
+  );
 }
 
 async function currencyOf(tx: Tx, restaurantId: string): Promise<string> {
@@ -687,6 +704,15 @@ export async function markServed(actor: Actor, itemId: string): Promise<Bill> {
 
     await tx.query(`UPDATE kitchen_items SET status = 'served', served_at = now(), ready_at = COALESCE(ready_at, now()) WHERE id = $1`, [itemId]);
     await refreshTicketStatus(tx, item.ticket_id);
+
+    // Le dernier plat est sur la table : l'addition part d'elle-même chez le
+    // caissier. Un dessert commandé ensuite la rouvrira.
+    const bill = await lockBill(tx, actor.restaurantId, item.bill_id);
+    const current = await getBill(actor.restaurantId, item.bill_id, tx);
+    const live = current.items.filter((line) => line.status !== 'cancelled');
+    if (bill.status === 'open' && live.length > 0 && live.every((line) => line.status === 'served')) {
+      await sendToCashier(tx, actor, bill, current.total, 'all_served');
+    }
     return getBill(actor.restaurantId, item.bill_id, tx);
   });
 }
