@@ -1,9 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { authed } from './authed';
+import { login } from './auth';
+import { authed, expireSession, setAuthTokens } from './authed';
+import { forgetAccount, pendingLogin, setPendingLogin } from './offlineLogin';
+import { saveSession } from './session';
 import { invalidateCache } from './cache';
-import { ApiError } from './client';
+import { API_URL, ApiError } from './client';
 import type { PaymentMethod } from './workspace/sales';
 
 /**
@@ -84,7 +87,65 @@ export function markOffline(): void {
 export function markOnline(): void {
   if (!state.online) {
     emit({ online: true });
-    void syncPending();
+    void reconnect();
+  }
+}
+
+/**
+ * Retour du réseau : la session ouverte hors ligne devient une vraie
+ * connexion, puis les ventes en attente partent.
+ */
+let reconnecting = false;
+
+async function reconnect(): Promise<void> {
+  // Le guet régulier et l'événement « en ligne » peuvent arriver ensemble.
+  if (reconnecting) return;
+  reconnecting = true;
+  try {
+    await reconnectOnce();
+  } finally {
+    reconnecting = false;
+  }
+}
+
+async function reconnectOnce(): Promise<void> {
+  const credentials = pendingLogin();
+  if (credentials) {
+    try {
+      const session = await login(credentials.email, credentials.password);
+      setAuthTokens({ accessToken: session.accessToken, refreshToken: session.refreshToken });
+      await saveSession(session);
+      setPendingLogin(null);
+    } catch (error) {
+      if (isNetworkError(error)) {
+        emit({ online: false });
+        return;
+      }
+      // Mot de passe changé, compte désactivé : la copie ne vaut plus rien.
+      // Les ventes restent gardées sous ce compte jusqu'à sa prochaine connexion.
+      await forgetAccount(credentials.email);
+      setPendingLogin(null);
+      expireSession();
+      return;
+    }
+  }
+  await syncPending();
+}
+
+/** Le serveur répond-il ? Un simple appel à sa page d'accueil suffit. */
+async function probe(): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    await fetch(`${API_URL}/`, { signal: controller.signal });
+    // Une session ouverte hors ligne attend sa vraie connexion, même si
+    // l'application ne s'était pas encore crue coupée.
+    if (state.online && pendingLogin()) void reconnect();
+    else markOnline();
+  } catch {
+    markOffline();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -158,7 +219,7 @@ export function startOffline(userId: string): () => void {
     .then((raw) => {
       const pending = raw ? (JSON.parse(raw) as OfflineSale[]) : [];
       emit({ pending: Array.isArray(pending) ? pending : [] });
-      void syncPending();
+      void (pendingLogin() ? probe() : syncPending());
     })
     .catch(() => undefined);
 
@@ -176,8 +237,11 @@ export function startOffline(userId: string): () => void {
   }
   // Filet de sécurité : un réseau revenu sans prévenir est essayé régulièrement.
   const timer = setInterval(() => {
-    if (state.pending.some((sale) => !sale.rejected)) void syncPending();
-  }, 20_000);
+    // Hors ligne (ou session ouverte sans internet), on guette le retour du
+    // serveur ; en ligne, on envoie ce qui reste.
+    if (!state.online || pendingLogin()) void probe();
+    else if (state.pending.some((sale) => !sale.rejected)) void syncPending();
+  }, 15_000);
   cleanups.push(() => clearInterval(timer));
 
   return () => {

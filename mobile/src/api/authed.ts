@@ -1,5 +1,6 @@
 import { API_URL, ApiError, request } from './client';
 import { saveTokens } from './session';
+import { pendingLogin } from './offlineLogin';
 
 /**
  * Appels authentifiés de l'espace restaurant.
@@ -41,6 +42,11 @@ interface AuthedOptions {
 
 export async function authed<T>(path: string, options: AuthedOptions = {}): Promise<T> {
   if (!tokens) {
+    // Session ouverte sans internet : pas encore de jeton, l'appel attend le
+    // retour du réseau comme n'importe quelle requête hors ligne.
+    if (pendingLogin()) {
+      throw new ApiError(0, 'NETWORK', 'Hors connexion : disponible au retour d’internet.');
+    }
     const error = new ApiError(401, 'UNAUTHORIZED', 'Session expirée, reconnectez-vous.');
     onSessionExpired?.();
     throw error;
@@ -61,6 +67,11 @@ export async function authed<T>(path: string, options: AuthedOptions = {}): Prom
 
     return request<T>(path, { ...options, token: renewed.accessToken });
   }
+}
+
+/** La vraie connexion, au retour du réseau, a été refusée : retour à l'écran de connexion. */
+export function expireSession(): void {
+  onSessionExpired?.();
 }
 
 /**

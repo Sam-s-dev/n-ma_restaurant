@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { withSnapshot } from '../offline';
 
 /** §6 — Stock des matières premières. */
 export interface StockItem {
@@ -66,12 +67,15 @@ export const MOVEMENT_REASONS: Record<string, string> = {
 export function listStock(
   filters: { search?: string; onlyLow?: boolean } = {},
 ): Promise<StockList> {
-  return authed<StockList>(
-    `/api/stock${queryString({
-      search: filters.search,
-      onlyLow: filters.onlyLow ? 'true' : undefined,
-    })}`,
-  );
+  const fetch = () =>
+    authed<StockList>(
+      `/api/stock${queryString({
+        search: filters.search,
+        onlyLow: filters.onlyLow ? 'true' : undefined,
+      })}`,
+    );
+  // La liste complète est gardée : consultable pendant une coupure.
+  return filters.search || filters.onlyLow ? fetch() : withSnapshot('stock:all', fetch);
 }
 
 export function createStockItem(payload: {

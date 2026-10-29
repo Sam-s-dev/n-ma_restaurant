@@ -19,6 +19,8 @@ import type { LoginResponse } from '../api/auth';
 import { login as adminLogin } from '../api/superadmin';
 import type { AdminLoginResponse } from '../api/superadmin';
 import { saveSession } from '../api/session';
+import { forgetAccount, loginOffline, rememberAccount, setPendingLogin } from '../api/offlineLogin';
+import type { Profile } from '../api/auth';
 import { saveAdminSession } from '../api/adminSession';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -26,6 +28,8 @@ import { screenPadding, spacing } from '../theme/layout';
 
 interface LoginScreenProps {
   onSuccess: (session: LoginResponse) => void;
+  /** Session ouverte sans internet, avec le profil gardé sur ce téléphone. */
+  onOfflineSuccess: (profile: Profile) => void;
   /** Le même formulaire ouvre aussi la console de l'éditeur. */
   onAdminSuccess: (session: AdminLoginResponse) => void;
   onBack: () => void;
@@ -92,6 +96,7 @@ function statusFromError(error: ApiError): StatusMessage {
 
 export function LoginScreen({
   onSuccess,
+  onOfflineSuccess,
   onAdminSuccess,
   onBack,
   onGoToRegister,
@@ -150,8 +155,30 @@ export function LoginScreen({
       // Cas courant : un gérant de restaurant.
       const session = await login(normalizedEmail, password);
       await saveSession(session);
+      // Pour pouvoir rouvrir la session sur ce téléphone pendant une coupure.
+      await rememberAccount(normalizedEmail, password, session);
       onSuccess(session);
     } catch (error) {
+      // Pas d'internet : celui qui s'est déjà connecté ici entre quand même.
+      if (error instanceof ApiError && error.code === 'NETWORK') {
+        const profile = await loginOffline(normalizedEmail, password);
+        if (profile) {
+          setPendingLogin({ email: normalizedEmail, password });
+          onOfflineSuccess(profile);
+          return;
+        }
+        setStatus({
+          tone: 'danger',
+          title: 'Pas d’internet',
+          message:
+            'Sans connexion, seul un compte déjà connecté une fois sur ce téléphone peut entrer, avec le même mot de passe.',
+        });
+        return;
+      }
+      if (error instanceof ApiError && error.code === 'UNAUTHORIZED') {
+        // Mot de passe changé : l'ancienne copie ne doit plus ouvrir de session.
+        await forgetAccount(normalizedEmail);
+      }
       if (!(error instanceof ApiError)) {
         setStatus({
           tone: 'danger',

@@ -18,6 +18,7 @@ import { PublicSite } from '../screens/public/PublicSite';
 import { currentPublicRoute } from '../utils/publicRoute';
 import { disablePush } from '../utils/push';
 import { clearSnapshots } from '../api/offline';
+import { setPendingLogin } from '../api/offlineLogin';
 import { colors } from '../theme/colors';
 
 export type RootStackParamList = {
@@ -89,6 +90,7 @@ function StaffNavigator({ onReady }: RootNavigatorProps) {
     // fraction de seconde sous le compte suivant.
     invalidateCache();
     await clearSnapshots();
+    setPendingLogin(null);
     await clearSession().catch(() => undefined);
     setProfile(null);
   }, []);
@@ -174,6 +176,11 @@ function StaffNavigator({ onReady }: RootNavigatorProps) {
             <Stack.Screen name="Login">
               {({ navigation }) => (
                 <LoginScreen
+                  onOfflineSuccess={(offlineProfile) => {
+                    // Pas encore de jeton : la vraie connexion se fera au retour du réseau.
+                    setAuthTokens(null);
+                    setProfile(offlineProfile);
+                  }}
                   onSuccess={(session: LoginResponse) => {
                     setAuthTokens({
                       accessToken: session.accessToken,
