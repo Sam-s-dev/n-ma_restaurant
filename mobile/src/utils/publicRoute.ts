@@ -44,6 +44,39 @@ export function publicMenuUrl(slug: string): string {
   return `${webAppUrl()}/r/${slug}`;
 }
 
+export function trackingUrl(code: string): string {
+  return `${webAppUrl()}/suivi/${code}`;
+}
+
+/**
+ * Commandes passées depuis ce téléphone : le client qui ferme la page les
+ * retrouve en rouvrant le lien du restaurant, sans compte. Seul le code de
+ * suivi est gardé ; l'état est toujours relu sur le serveur.
+ */
+export interface RememberedOrder {
+  code: string;
+  slug: string;
+  reference: string;
+  createdAt: string;
+}
+
+const ORDERS_KEY = 'nma.orders';
+const MAX_REMEMBERED = 20;
+
+export function rememberedOrders(slug?: string): RememberedOrder[] {
+  try {
+    const all = JSON.parse(readLocal(ORDERS_KEY) ?? '[]') as RememberedOrder[];
+    return Array.isArray(all) ? all.filter((order) => !slug || order.slug === slug) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberOrder(order: RememberedOrder): void {
+  const others = rememberedOrders().filter((item) => item.code !== order.code);
+  writeLocal(ORDERS_KEY, JSON.stringify([order, ...others].slice(0, MAX_REMEMBERED)));
+}
+
 /** Petites préférences du client (nom, téléphone) : jamais indispensables. */
 export function readLocal(key: string): string | null {
   try {

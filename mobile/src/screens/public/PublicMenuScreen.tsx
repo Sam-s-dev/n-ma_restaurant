@@ -10,21 +10,40 @@ import { ErrorState, LoadingState } from '../../components/workspace/ScreenState
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
 import { API_URL, ApiError, THUMB } from '../../api/client';
-import { fetchPublicMenu, placeOrder } from '../../api/public';
-import type { PublicDish, PublicMenu } from '../../api/public';
+import { fetchPublicMenu, placeOrder, trackOrder } from '../../api/public';
+import type { PublicDish, PublicMenu, TrackedOrder } from '../../api/public';
 import type { OrderPayment } from '../../api/workspace/orders';
 import { formatMoney } from '../../utils/money';
 import type { Currency } from '../../utils/money';
-import { readLocal, writeLocal } from '../../utils/publicRoute';
+import { formatDateTime } from '../../utils/date';
+import { readLocal, rememberedOrders, rememberOrder, writeLocal } from '../../utils/publicRoute';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { maxContentWidth, radius, shadows, spacing } from '../../theme/layout';
 
 const CUSTOMER_KEY = 'nma.customer';
 
+/** Les commandes récentes relues à l'ouverture : au-delà, l'historique suffit. */
+const RECENT_TO_CHECK = 5;
+
+/** L'état d'une commande, dit comme au client. */
+export const CUSTOMER_STATUS: Record<TrackedOrder['status'], string> = {
+  pending: 'en attente de confirmation',
+  accepted: 'en préparation',
+  ready: 'prête',
+  out_for_delivery: 'en route',
+  delivered: 'livrée',
+  completed: 'terminée',
+  rejected: 'refusée',
+  cancelled: 'annulée',
+};
+
+const IN_PROGRESS = new Set(['pending', 'accepted', 'ready', 'out_for_delivery']);
+
 interface PublicMenuScreenProps {
   slug: string;
   onOrdered: (trackingCode: string) => void;
+  onTrack: (trackingCode: string) => void;
 }
 
 const photoOf = (dish: PublicDish) => (dish.photoUrl ? `${API_URL}${dish.photoUrl}?w=${THUMB.medium}` : null);
@@ -35,13 +54,29 @@ const photoOf = (dish: PublicDish) => (dish.photoUrl ? `${API_URL}${dish.photoUr
  * Aucun compte : on choisit ses plats, on donne son nom, son téléphone et
  * un point de repère, et le restaurant rappelle pour confirmer.
  */
-export function PublicMenuScreen({ slug, onOrdered }: PublicMenuScreenProps) {
+export function PublicMenuScreen({ slug, onOrdered, onTrack }: PublicMenuScreenProps) {
   const insets = useSafeAreaInsets();
   const [menu, setMenu] = useState<PublicMenu | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState('all');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [pastOrders, setPastOrders] = useState<TrackedOrder[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // Les commandes déjà passées depuis ce téléphone, relues sur le serveur
+  // pour afficher leur état du moment.
+  useEffect(() => {
+    const remembered = rememberedOrders(slug).slice(0, RECENT_TO_CHECK);
+    if (remembered.length === 0) return;
+    void Promise.allSettled(remembered.map((order) => trackOrder(order.code))).then((results) =>
+      setPastOrders(
+        results
+          .filter((result): result is PromiseFulfilledResult<TrackedOrder> => result.status === 'fulfilled')
+          .map((result) => result.value),
+      ),
+    );
+  }, [slug]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -84,6 +119,19 @@ export function PublicMenuScreen({ slug, onOrdered }: PublicMenuScreenProps) {
   const setQuantity = (dishId: string, quantity: number) =>
     setCart((current) => ({ ...current, [dishId]: quantity }));
 
+  const current = pastOrders.find((order) => IN_PROGRESS.has(order.status));
+
+  /** Remet dans le panier les plats d'une commande passée, s'ils sont encore proposés. */
+  function reorder(order: TrackedOrder) {
+    const next: Record<string, number> = {};
+    for (const item of order.items) {
+      const dish = menu?.dishes.find((candidate) => candidate.name === item.dishName && !candidate.soldOut);
+      if (dish) next[dish.id] = (next[dish.id] ?? 0) + item.quantity;
+    }
+    setCart(next);
+    setHistoryOpen(false);
+  }
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -113,6 +161,27 @@ export function PublicMenuScreen({ slug, onOrdered }: PublicMenuScreenProps) {
             </View>
           </View>
         </View>
+
+        {current && (
+          <Pressable
+            onPress={() => onTrack(current.trackingCode)}
+            style={({ pressed }) => [styles.current, pressed && styles.pressed]}
+            accessibilityRole="button"
+          >
+            <Icon name="truck" size={18} color={colors.textOnPrimary} />
+            <Text style={styles.currentText}>
+              Votre commande {current.reference.slice(-4)} est {CUSTOMER_STATUS[current.status]}
+            </Text>
+            <Text style={styles.currentAction}>Suivre</Text>
+          </Pressable>
+        )}
+
+        {pastOrders.length > 0 && (
+          <Pressable onPress={() => setHistoryOpen(true)} style={styles.call} accessibilityRole="button">
+            <Icon name="clock" size={15} color={colors.primary} />
+            <Text style={styles.callText}>Mes commandes ({pastOrders.length})</Text>
+          </Pressable>
+        )}
 
         {Boolean(restaurant.message) && (
           <View style={styles.message}>
@@ -209,6 +278,33 @@ export function PublicMenuScreen({ slug, onOrdered }: PublicMenuScreenProps) {
         </View>
       )}
 
+      <Sheet
+        visible={historyOpen}
+        title="Mes commandes"
+        subtitle="Passées depuis ce téléphone"
+        onClose={() => setHistoryOpen(false)}
+      >
+        {pastOrders.map((order) => (
+          <View key={order.trackingCode} style={styles.past}>
+            <Pressable onPress={() => onTrack(order.trackingCode)} accessibilityRole="button" style={styles.pastBody}>
+              <Text style={styles.pastTitle}>
+                {order.reference} · {CUSTOMER_STATUS[order.status]}
+              </Text>
+              <Text style={styles.pastMeta} numberOfLines={2}>
+                {formatDateTime(order.createdAt)} · {money(order.totalAmount)}
+                {'\n'}
+                {order.items.map((item) => `${item.quantity} ${item.dishName}`).join(', ')}
+              </Text>
+            </Pressable>
+            {ordering.open && !IN_PROGRESS.has(order.status) && (
+              <Pressable onPress={() => reorder(order)} style={styles.again} accessibilityRole="button">
+                <Text style={styles.againText}>Recommander</Text>
+              </Pressable>
+            )}
+          </View>
+        ))}
+      </Sheet>
+
       <CheckoutSheet
         visible={checkoutOpen}
         menu={menu}
@@ -300,6 +396,12 @@ function CheckoutSheet({ visible, menu, lines, itemsTotal, money, onClose, onRef
         note: note.trim() || null,
         paymentMethod: payment,
         items: lines.map((line) => ({ dishId: line.dish.id, quantity: line.quantity })),
+      });
+      rememberOrder({
+        code: order.trackingCode,
+        slug: menu.restaurant.slug,
+        reference: order.reference,
+        createdAt: order.createdAt,
       });
       writeLocal(
         CUSTOMER_KEY,
@@ -497,6 +599,59 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: 12,
     lineHeight: 16,
+  },
+  current: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.success,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  currentText: {
+    flex: 1,
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textOnPrimary,
+  },
+  currentAction: {
+    fontFamily: fontFamily.bold,
+    fontSize: 13,
+    color: colors.textOnPrimary,
+    textDecorationLine: 'underline',
+  },
+  past: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  pastBody: {
+    flex: 1,
+  },
+  pastTitle: {
+    ...typography.bodyStrong,
+    fontSize: 14,
+  },
+  pastMeta: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textTertiary,
+  },
+  again: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  againText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 12,
+    color: colors.primary,
   },
   message: {
     backgroundColor: colors.pastelAmber,

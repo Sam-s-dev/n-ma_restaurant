@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Banner } from '../../components/Banner';
 import { Button } from '../../components/Button';
@@ -13,6 +13,7 @@ import type { TrackedOrder } from '../../api/public';
 import { PAYMENT_LABELS } from '../../api/workspace/orders';
 import { formatDateTime } from '../../utils/date';
 import { formatMoney } from '../../utils/money';
+import { rememberOrder, trackingUrl } from '../../utils/publicRoute';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { maxContentWidth, radius, spacing } from '../../theme/layout';
@@ -65,12 +66,22 @@ export function OrderTrackingScreen({ code, onBackToMenu }: OrderTrackingScreenP
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const next = await trackOrder(code);
       setOrder(next);
       setError(null);
+      // Ouverte depuis un lien reçu sur WhatsApp, elle rejoint « Mes commandes ».
+      if (next.restaurant.slug) {
+        rememberOrder({
+          code: next.trackingCode,
+          slug: next.restaurant.slug,
+          reference: next.reference,
+          createdAt: next.createdAt,
+        });
+      }
       if (typeof document !== 'undefined') document.title = `Commande ${next.reference} · ${next.restaurant.name}`;
     } catch (cause) {
       // Une coupure passagère ne doit pas effacer la commande déjà affichée.
@@ -106,6 +117,20 @@ export function OrderTrackingScreen({ code, onBackToMenu }: OrderTrackingScreenP
   const closed = order.status === 'rejected' || order.status === 'cancelled';
   const steps = stepsOf(order);
   const reached = steps.filter((step) => step.at).length;
+
+  const link = trackingUrl(code);
+
+  function sendToWhatsApp() {
+    const text = `Ma commande ${order!.reference} chez ${order!.restaurant.name} : ${link}`;
+    void Linking.openURL(`https://wa.me/?text=${encodeURIComponent(text)}`);
+  }
+
+  async function copyLink() {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(link).catch(() => undefined);
+      setCopied(true);
+    }
+  }
 
   async function cancel() {
     setCancelling(true);
@@ -188,8 +213,24 @@ export function OrderTrackingScreen({ code, onBackToMenu }: OrderTrackingScreenP
       </Card>
 
       {!finished && (
-        <Text style={styles.hint}>Gardez cette page ouverte ou son lien : elle se met à jour toute seule.</Text>
+        <Text style={styles.hint}>
+          Cette page se met à jour toute seule. Vous la retrouverez en rouvrant le lien du restaurant sur ce
+          téléphone ; envoyez-vous le lien pour la retrouver ailleurs.
+        </Text>
       )}
+
+      <View style={styles.keep}>
+        <Pressable onPress={sendToWhatsApp} style={styles.keepButton} accessibilityRole="button">
+          <Icon name="send" size={15} color={colors.success} />
+          <Text style={[styles.keepText, { color: colors.success }]}>Envoyer sur WhatsApp</Text>
+        </Pressable>
+        {Platform.OS === 'web' && (
+          <Pressable onPress={() => void copyLink()} style={styles.keepButton} accessibilityRole="button">
+            <Icon name={copied ? 'check' : 'receipt'} size={15} color={colors.primary} />
+            <Text style={styles.keepText}>{copied ? 'Lien copié' : 'Copier le lien'}</Text>
+          </Pressable>
+        )}
+      </View>
 
       <View style={styles.actions}>
         {Boolean(order.restaurant.phone) && (
@@ -345,5 +386,28 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.md,
+  },
+  keep: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  keepButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+  },
+  keepText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.primary,
   },
 });

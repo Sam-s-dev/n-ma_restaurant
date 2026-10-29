@@ -29,7 +29,12 @@ export function PublicSite({ initial }: { initial: PublicRoute }) {
   }
 
   return route.kind === 'menu' ? (
-    <PublicMenuScreen key={route.slug} slug={route.slug} onOrdered={(code) => go({ kind: 'track', code })} />
+    <PublicMenuScreen
+      key={route.slug}
+      slug={route.slug}
+      onOrdered={(code) => go({ kind: 'track', code })}
+      onTrack={(code) => go({ kind: 'track', code })}
+    />
   ) : (
     <OrderTrackingScreen key={route.code} code={route.code} onBackToMenu={(slug) => go({ kind: 'menu', slug })} />
   );
