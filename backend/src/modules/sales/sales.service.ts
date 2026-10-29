@@ -234,6 +234,8 @@ export async function insertSaleRecord(
     customerId: string | null;
     note: string | null;
     soldAt: Date;
+    /** Le serveur de la table, pour les ventes en salle. */
+    servedBy?: string | null;
   },
 ): Promise<{ id: string; reference: string }> {
   const { restaurantId, userId, lines, totalAmount, paymentMethod, soldAt } = params;
@@ -250,10 +252,21 @@ export async function insertSaleRecord(
   const sale = await tx.queryOne<{ id: string }>(
     `INSERT INTO sales
        (restaurant_id, reference, total_amount, payment_method, status,
-        customer_id, note, sold_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        customer_id, note, sold_at, created_by, served_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id`,
-    [restaurantId, reference, totalAmount, paymentMethod, status, params.customerId, params.note, soldAt, userId],
+    [
+      restaurantId,
+      reference,
+      totalAmount,
+      paymentMethod,
+      status,
+      params.customerId,
+      params.note,
+      soldAt,
+      userId,
+      params.servedBy ?? null,
+    ],
   );
   if (!sale) throw new Error('Création de la vente impossible.');
 

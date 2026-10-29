@@ -8,7 +8,7 @@
  * le serveur, lui, refuse quoi qu'il arrive.
  */
 
-export const ROLES = ['manager', 'cashier', 'storekeeper', 'driver'] as const;
+export const ROLES = ['manager', 'cashier', 'storekeeper', 'driver', 'waiter', 'cook'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -16,6 +16,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   cashier: 'Caissier',
   storekeeper: 'Magasinier',
   driver: 'Livreur',
+  waiter: 'Serveur',
+  cook: 'Cuisinier',
 };
 
 export const PERMISSIONS = [
@@ -48,6 +50,10 @@ export const PERMISSIONS = [
   // Commandes en ligne
   'orders.manage', // accepter, préparer, confier au livreur, encaisser
   'deliveries.handle', // ses propres courses, et rien d'autre
+  // Service en salle
+  'tables.serve', // ouvrir une addition, envoyer en cuisine, demander l'addition
+  'kitchen.handle', // l'écran cuisine : préparer, marquer prêt
+  'bills.settle', // encaisser les additions des tables
   'dashboard.view',
   'reports.export',
   // Administration
@@ -74,6 +80,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'menu.view',
     'menu.availability',
     'orders.manage',
+    'bills.settle',
   ]),
 
   // Le magasinier tient le stock. Il voit ce qu'il y a en caisse pour
@@ -88,6 +95,14 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // Le livreur ne voit que les courses qu'on lui confie : l'adresse, le
   // téléphone du client et le montant à encaisser.
   driver: new Set<Permission>(['deliveries.handle']),
+
+  // Le serveur prend les commandes à table. Il ne touche pas à l'argent :
+  // le caissier encaisse l'addition qu'il a demandée.
+  waiter: new Set<Permission>(['tables.serve', 'menu.view']),
+
+  // Le cuisinier prépare. Il ne voit ni la caisse ni les chiffres, et
+  // marque un plat épuisé quand un ingrédient manque.
+  cook: new Set<Permission>(['kitchen.handle', 'menu.view', 'menu.availability']),
 };
 
 export function isRole(value: unknown): value is Role {

@@ -1,5 +1,6 @@
 import type { Profile } from '../../api/auth';
-import { can } from '../../api/permissions';
+import { can, roleOf } from '../../api/permissions';
+import type { Role } from '../../api/permissions';
 import type { Permission } from '../../api/permissions';
 import type { WorkspaceRoute } from './WorkspaceContext';
 
@@ -20,6 +21,9 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
   orders: ['orders.manage'],
   deliveries: ['deliveries.handle'],
   online: ['settings.manage'],
+  tables: ['tables.serve'],
+  kitchen: ['kitchen.handle'],
+  bills: ['bills.settle'],
   // Le compte personnel (mot de passe, déconnexion) est ouvert à tous.
   settings: null,
   notifications: null,
@@ -27,21 +31,18 @@ const ROUTE_PERMISSIONS: Record<WorkspaceRoute, Permission[] | null> = {
 };
 
 /**
- * Ordre de préférence pour la barre d'onglets : le gérant retrouve
- * exactement ses cinq onglets habituels, le caissier, le magasinier et le
- * livreur voient les leurs remonter à la place de ceux qui leur sont fermés.
+ * Les onglets de chaque métier, dans l'ordre où il s'en sert : le gérant
+ * retrouve ses onglets habituels, le serveur arrive sur les tables, le
+ * cuisinier sur l'écran cuisine. Le reste est dans « Plus ».
  */
-const TAB_CANDIDATES: WorkspaceRoute[] = [
-  'dashboard',
-  'deliveries',
-  'sales',
-  'cash',
-  'menu',
-  'orders',
-  'stock',
-  'purchases',
-  'credits',
-];
+const TABS_BY_ROLE: Record<Role, WorkspaceRoute[]> = {
+  manager: ['dashboard', 'sales', 'cash', 'menu'],
+  cashier: ['sales', 'bills', 'orders', 'menu'],
+  storekeeper: ['stock', 'purchases'],
+  driver: ['deliveries'],
+  waiter: ['tables', 'menu'],
+  cook: ['kitchen', 'menu'],
+};
 
 const MAX_TABS = 4; // plus l'onglet « Plus »
 
@@ -51,7 +52,7 @@ export function canOpen(profile: Profile, route: WorkspaceRoute): boolean {
 }
 
 export function tabRoutesFor(profile: Profile): WorkspaceRoute[] {
-  const tabs = TAB_CANDIDATES.filter((route) => canOpen(profile, route)).slice(0, MAX_TABS);
+  const tabs = TABS_BY_ROLE[roleOf(profile)].filter((route) => canOpen(profile, route)).slice(0, MAX_TABS);
   return [...tabs, 'more'];
 }
 

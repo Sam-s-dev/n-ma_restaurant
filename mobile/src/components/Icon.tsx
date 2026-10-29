@@ -53,6 +53,7 @@ export type IconName =
   | 'cart'
   | 'truck'
   | 'globe'
+  | 'flame'
   | 'more';
 
 interface IconProps {
@@ -421,6 +422,14 @@ function renderPaths(name: IconName, s: StrokeProps, color: string) {
           <Circle cx="7" cy="18" r="1.8" {...s} />
           <Circle cx="17" cy="18" r="1.8" {...s} />
         </>
+      );
+
+    case 'flame':
+      return (
+        <Path
+          d="M12 22c4 0 7-2.8 7-7 0-3.2-2-5.6-3.6-7.4-.3 1.9-1.3 3.2-2.6 3.8.2-3-1.2-6.2-4.3-8.4.3 3.1-1.4 5.3-2.9 7.1C4.4 11.6 5 12.8 5 15c0 4.2 3 7 7 7z"
+          {...s}
+        />
       );
 
     case 'globe':

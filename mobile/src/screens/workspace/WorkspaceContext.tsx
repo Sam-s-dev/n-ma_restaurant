@@ -23,7 +23,10 @@ export type WorkspaceRoute =
   | 'reports'
   | 'orders'
   | 'deliveries'
-  | 'online';
+  | 'online'
+  | 'tables'
+  | 'kitchen'
+  | 'bills';
 
 export interface WorkspaceContextValue {
   profile: Profile;

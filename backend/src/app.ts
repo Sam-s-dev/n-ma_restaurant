@@ -67,6 +67,9 @@ export function createApp() {
       orders: '/api/orders',
       deliveries: '/api/deliveries',
       public: '/api/public',
+      tables: '/api/tables',
+      bills: '/api/bills',
+      kitchen: '/api/kitchen',
     });
   });
 

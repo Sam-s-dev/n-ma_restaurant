@@ -69,7 +69,10 @@ restaurant concerné.
 ### Rôles
 
 Chaque compte a un rôle : `manager` (gérant), `cashier` (caissier),
-`storekeeper` (magasinier) ou `driver` (livreur). Les droits sont fixes par rôle et définis dans
+`storekeeper` (magasinier), `driver` (livreur), `waiter` (serveur) ou
+`cook` (cuisinier). Le serveur a `tables.serve` et `menu.view` ; le
+cuisinier `kitchen.handle`, `menu.view` et `menu.availability` ; le caissier
+encaisse les additions avec `bills.settle`. Les droits sont fixes par rôle et définis dans
 [backend/src/core/permissions.ts](backend/src/core/permissions.ts). Le profil
 renvoyé par `/api/auth/login` et `/api/auth/me` contient `user.role` et
 `user.permissions`. L'application mobile s'en sert pour masquer ce qui serait
@@ -335,6 +338,49 @@ créditée). Ou `rejected` / `cancelled` (les portions reviennent au plat).
 
 Le Super Admin autorise ou retire le mini-site d'un restaurant :
 `POST /api/super-admin/restaurants/:id/online { allowed }`.
+
+---
+
+## Service en salle : tables, additions, cuisine
+
+Une table peut avoir **plusieurs additions** ouvertes (des clients qui ne
+sont pas ensemble), chacune payée séparément. Une addition reçoit plusieurs
+envois en cuisine ; les portions sont prises à l'envoi.
+
+### Plan de salle (`/api/tables`)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/` | Tables actives, leur état (`free`, `occupied`, `cooking`, `ready`, `bill`) et leurs additions en cours |
+| `POST` | `/`, `/batch` | Créer une table, ou « Table 1 » à « Table N » (`settings.manage`) |
+| `PATCH` / `DELETE` | `/:id` | Modifier ; retirer (archivée si elle a déjà servi) |
+| `GET` / `PATCH` | `/kitchen-settings` | Seuils d'attente en cuisine `{ warnMinutes, lateMinutes }` |
+| `POST` | `/:id/bills` | Ouvrir une addition `{ label?, guests }` (`tables.serve`) |
+
+### Additions (`/api/bills`)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/?status=active\|paid` | Additions à encaisser (demandées en tête), ou payées depuis 24 h |
+| `GET` | `/:id` | Détail, plat par plat avec leur état |
+| `POST` | `/:id/send` | Envoyer en cuisine `{ items: [{ dishId, quantity, note? }] }` |
+| `POST` | `/:id/request` | Demander l'addition : le caissier est prévenu |
+| `POST` | `/:id/pay` | Encaisser `{ paymentMethod, customerId? }` : crée la vente (caisse ouverte exigée pour le caissier) |
+| `POST` | `/:id/cancel` | Annuler l'addition (`sales.cancel`, motif) |
+| `POST` | `/items/:id/served` | Plat servi |
+| `POST` | `/items/:id/cancel` | Annuler un plat envoyé (`sales.cancel`, motif) : la portion revient |
+
+### Cuisine (`/api/kitchen`, droit `kitchen.handle`)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/` | Tickets à préparer et prêts depuis 30 min, sans prix |
+| `POST` | `/tickets/:id/start` | Préparation commencée |
+| `POST` | `/tickets/:id/ready` | Tout le ticket prêt, ou un plat avec `{ itemId }` |
+
+Les commandes en ligne acceptées arrivent comme des tickets ; prêtes en
+cuisine, elles passent « prêtes » côté caissier et livreur. Un ticket qui
+dépasse `lateMinutes` prévient le gérant, une seule fois.
 
 ---
 

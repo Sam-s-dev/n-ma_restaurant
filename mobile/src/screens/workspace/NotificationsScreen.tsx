@@ -38,6 +38,12 @@ function styleOf(kind: string): KindStyle {
       return kind.endsWith('issue') || kind.endsWith('cancelled')
         ? { icon: 'globe', color: colors.iconRed, background: colors.pastelRed }
         : { icon: 'globe', color: colors.iconGreen, background: colors.pastelGreen };
+    case 'kitchen':
+      return kind.endsWith('late') || kind.endsWith('cancelled')
+        ? { icon: 'flame', color: colors.iconRed, background: colors.pastelRed }
+        : { icon: 'flame', color: colors.iconAmber, background: colors.pastelAmber };
+    case 'bill':
+      return { icon: 'receipt', color: colors.iconPurple, background: colors.pastelPurple };
     case 'delivery':
       return { icon: 'truck', color: colors.iconBlue, background: colors.pastelBlue };
     case 'member':

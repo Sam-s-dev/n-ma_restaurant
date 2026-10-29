@@ -9,7 +9,7 @@ l'ordre prévu au §12 : base de données, puis backend, puis conteneur Docker.
 Le design de l'application mobile Expo viendra ensuite, une fois le backend
 stabilisé.
 
-**État : backend complet et fonctionnel.** 307 vérifications de bout en bout
+**État : backend complet et fonctionnel.** 337 vérifications de bout en bout
 passent sur les conteneurs Docker (`npm run smoke`).
 
 ---
@@ -27,7 +27,7 @@ app restaurant/
 │
 ├── database/
 │   ├── README.md                 # schéma et garanties de la base
-│   └── migrations/               # 23 migrations SQL versionnées
+│   └── migrations/               # 24 migrations SQL versionnées
 │
 └── backend/
     ├── scripts/smoke-test.ts     # test de bout en bout
@@ -113,11 +113,14 @@ npm run dev                      # rechargement à chaud
 3. Le gérant se connecte, règle ses paramètres, saisit son menu, son stock et
    son personnel.
 4. Il crée les comptes de ses collègues avec un rôle : gérant, caissier,
-   magasinier ou livreur. Les actions sensibles sont inscrites au journal d'activité.
+   magasinier, livreur, serveur ou cuisinier. Les actions sensibles sont inscrites au journal d'activité.
 5. Il ouvre son mini-site (`/r/nom-du-restaurant`) : ses clients commandent
    sans compte, le caissier confirme par téléphone, le livreur livre et
    rapporte l'argent, qui entre en caisse comme une vente.
-6. À tout moment, l'éditeur peut suspendre le compte : les sessions ouvertes
+6. En salle, le serveur ouvre une addition par client à la table, envoie en
+   cuisine ; le cuisinier prépare sur son écran ; le caissier encaisse
+   l'addition demandée.
+7. À tout moment, l'éditeur peut suspendre le compte : les sessions ouvertes
    sont coupées immédiatement.
 
 La référence complète des routes est dans [API.md](API.md).

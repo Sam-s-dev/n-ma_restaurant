@@ -45,6 +45,9 @@ import { ReportsScreen } from './ReportsScreen';
 import { OrdersScreen } from './OrdersScreen';
 import { DeliveriesScreen } from './DeliveriesScreen';
 import { OnlineScreen } from './OnlineScreen';
+import { TablesScreen } from './TablesScreen';
+import { KitchenScreen } from './KitchenScreen';
+import { BillsScreen } from './BillsScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 
 interface WorkspaceScreenProps {
@@ -72,6 +75,9 @@ const TITLES: Record<WorkspaceRoute, string> = {
   orders: 'Commandes en ligne',
   deliveries: 'Mes livraisons',
   online: 'Mini-site de commande',
+  tables: 'Tables',
+  kitchen: 'Cuisine',
+  bills: 'Additions à encaisser',
 };
 
 /** Interrogation des notifications : assez vite pour ressembler à une messagerie. */
@@ -95,6 +101,9 @@ const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>
   orders: { label: 'Commandes', icon: 'globe' },
   deliveries: { label: 'Livraisons', icon: 'truck' },
   online: { label: 'Mini-site', icon: 'globe' },
+  tables: { label: 'Tables', icon: 'grid' },
+  kitchen: { label: 'Cuisine', icon: 'flame' },
+  bills: { label: 'Additions', icon: 'receipt' },
   more: { label: 'Plus', icon: 'grid' },
 };
 
@@ -428,6 +437,12 @@ function renderRoute(route: WorkspaceRoute) {
       return <DeliveriesScreen />;
     case 'online':
       return <OnlineScreen />;
+    case 'tables':
+      return <TablesScreen />;
+    case 'kitchen':
+      return <KitchenScreen />;
+    case 'bills':
+      return <BillsScreen />;
     default:
       return null;
   }

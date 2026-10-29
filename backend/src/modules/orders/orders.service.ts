@@ -3,6 +3,7 @@ import { query, queryOne } from '../../db/pool';
 import { withTransaction, type Tx } from '../../db/transaction';
 import { formatAmount, round2 } from '../../utils/money';
 import { resolveOrCreateCustomer } from '../customers/customers.service';
+import { closeOnlineTicket, createOnlineTicket } from '../kitchen/kitchen.service';
 import { notify } from '../notifications/notifications.service';
 import { insertSaleRecord, type SaleLine } from '../sales/sales.service';
 
@@ -370,6 +371,8 @@ export async function acceptOrder(actor: Actor, orderId: string): Promise<Online
         WHERE id = $2`,
       [actor.userId, orderId],
     );
+    // La cuisine reçoit la commande sur le même écran que les tables.
+    await createOnlineTicket(tx, actor.restaurantId, orderId, actor.userId);
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }
@@ -412,6 +415,7 @@ export async function markReady(actor: Actor, orderId: string): Promise<OnlineOr
     await tx.query(`UPDATE online_orders SET status = 'ready', ready_at = now() WHERE id = $1`, [
       orderId,
     ]);
+    await closeOnlineTicket(tx, orderId, 'served');
 
     if (order.driver_id) {
       await notify(
@@ -508,6 +512,7 @@ export async function cancelOrder(actor: Actor, orderId: string, reason: string)
         : 'Cette commande est déjà close.',
     );
     if (order.accepted_at) await releasePortions(tx, actor.restaurantId, orderId);
+    await closeOnlineTicket(tx, orderId, 'cancelled');
     await tx.query(
       `UPDATE online_orders SET status = 'cancelled', closed_reason = $1, closed_at = now()
         WHERE id = $2`,
@@ -646,6 +651,7 @@ export async function completeOrder(
         WHERE id = $4`,
       [actor.userId, sale.id, method, orderId],
     );
+    await closeOnlineTicket(tx, orderId, 'served');
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }
@@ -691,6 +697,7 @@ export async function dispatchOrder(actor: Actor, orderId: string): Promise<Onli
         WHERE id = $1`,
       [orderId],
     );
+    await closeOnlineTicket(tx, orderId, 'served');
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }

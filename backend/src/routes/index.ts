@@ -11,6 +11,8 @@ import { mediaRouter } from '../modules/media/media.routes';
 import { menuRouter } from '../modules/menu/menu.routes';
 import { onlineRouter, publicRouter } from '../modules/online/online.routes';
 import { deliveriesRouter, ordersRouter } from '../modules/orders/orders.routes';
+import { kitchenRouter } from '../modules/kitchen/kitchen.routes';
+import { billsRouter, tablesRouter } from '../modules/tables/tables.routes';
 import { notificationsRouter } from '../modules/notifications/notifications.routes';
 import { purchasesRouter } from '../modules/purchases/purchases.routes';
 import { restaurantRouter } from '../modules/restaurant/restaurant.routes';
@@ -55,5 +57,8 @@ restaurantSpace.use('/reports', reportsRouter);       // Rapports et exports
 restaurantSpace.use('/online', onlineRouter);         // Mini-site : réglages, zones
 restaurantSpace.use('/orders', ordersRouter);         // Commandes en ligne
 restaurantSpace.use('/deliveries', deliveriesRouter); // Courses du livreur
+restaurantSpace.use('/tables', tablesRouter);         // Plan de salle
+restaurantSpace.use('/bills', billsRouter);           // Additions des tables
+restaurantSpace.use('/kitchen', kitchenRouter);       // Écran cuisine
 
 apiRouter.use('/', restaurantSpace);

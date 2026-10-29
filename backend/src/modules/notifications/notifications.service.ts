@@ -1,4 +1,4 @@
-import { hasPermission, isRole, type Permission } from '../../core/permissions';
+import { hasPermission, isRole, type Permission, type Role } from '../../core/permissions';
 import { query, queryOne } from '../../db/pool';
 import type { Tx } from '../../db/transaction';
 
@@ -44,7 +44,12 @@ const direct: Tx = { query, queryOne };
 export interface NotifyParams {
   restaurantId: string;
   /** Destinataires : ceux qui ont ce droit, et/ou ces comptes précis. */
-  to: { permission?: Permission; userIds?: Array<string | null | undefined> };
+  to: {
+    permission?: Permission;
+    /** Ceux qui ont ce rôle : le cuisinier, sans que le gérant reçoive chaque ticket. */
+    roles?: Role[];
+    userIds?: Array<string | null | undefined>;
+  };
   /** L'auteur de l'action ne se notifie pas lui-même. */
   exceptUserId?: string | null;
   kind: string;
@@ -72,6 +77,7 @@ export async function notify(params: NotifyParams, tx: Tx = direct): Promise<num
     .filter(
       (member) =>
         explicit.has(member.id) ||
+        (params.to.roles?.includes(member.role as Role) ?? false) ||
         (params.to.permission !== undefined &&
           isRole(member.role) &&
           hasPermission(member.role, params.to.permission)),

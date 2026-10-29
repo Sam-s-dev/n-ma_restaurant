@@ -1850,6 +1850,214 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
+  section('16 septies. Service en salle : serveur, cuisinier, caissier');
+
+  async function roomMember(role: string, name: string) {
+    const email = `${role}.${stamp}@exemple.com`;
+    await call('POST', '/api/users', {
+      token,
+      body: {
+        fullName: name,
+        email,
+        password: colleaguePassword,
+        role,
+        employee: { position: name, monthlySalary: 0, hireDate: today },
+      },
+    });
+    const login = await call('POST', '/api/auth/login', { body: { email, password: colleaguePassword } });
+    return login.body?.accessToken as string;
+  }
+  const waiter = await roomMember('waiter', 'Awa Serveuse');
+  const kitchenCook = await roomMember('cook', 'Moussa Cuisinier');
+  check('serveur et cuisinier se connectent', Boolean(waiter) && Boolean(kitchenCook));
+
+  const batch = await call('POST', '/api/tables/batch', { token, body: { count: 3, area: 'Salle' } });
+  check('le gérant crée trois tables d’un coup', batch.body?.created === 3, batch.body);
+  const deniedTable = await call('POST', '/api/tables', { token: waiter, body: { name: 'Table X' } });
+  check('le serveur ne dessine pas le plan (403)', deniedTable.status === 403, deniedTable.status);
+
+  const plan = await call('GET', '/api/tables', { token: waiter });
+  const table5 = plan.body?.data?.[0];
+  check('le serveur voit les tables libres', table5?.state === 'free', table5);
+
+  const kitchenDish = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: `Riz gras ${stamp}`, price: 25000, availableQuantity: 4 },
+  });
+  const drinkDish = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: `Jus de bissap ${stamp}`, price: 5000 },
+  });
+
+  // Deux clients qui ne sont pas ensemble, à la même table.
+  const billA = await call('POST', `/api/tables/${table5?.id}/bills`, { token: waiter, body: { label: 'Monsieur bleu' } });
+  const billB = await call('POST', `/api/tables/${table5?.id}/bills`, { token: waiter, body: { guests: 2 } });
+  check('deux additions ouvertes à la même table', billA.status === 201 && billB.status === 201, [billA.body, billB.body]);
+
+  const tooManyPortions = await call('POST', `/api/bills/${billA.body?.id}/send`, {
+    token: waiter,
+    body: { items: [{ dishId: kitchenDish.body?.id, quantity: 5 }] },
+  });
+  check('on n’envoie pas plus de portions qu’il n’en reste (422)', tooManyPortions.status === 422, tooManyPortions.body);
+
+  const sentA = await call('POST', `/api/bills/${billA.body?.id}/send`, {
+    token: waiter,
+    body: {
+      items: [
+        { dishId: kitchenDish.body?.id, quantity: 2, note: 'Sans piment' },
+        { dishId: drinkDish.body?.id, quantity: 1 },
+      ],
+    },
+  });
+  check('le serveur envoie en cuisine', sentA.body?.items?.length === 2 && sentA.body?.total === 55000, sentA.body);
+  const portions = await call('GET', `/api/menu/dishes/${kitchenDish.body?.id}`, { token });
+  check('les portions sont prises à l’envoi (4 − 2 = 2)', portions.body?.availableQuantity === 2, portions.body);
+  await call('POST', `/api/bills/${billB.body?.id}/send`, {
+    token: waiter,
+    body: { items: [{ dishId: kitchenDish.body?.id, quantity: 1 }] },
+  });
+
+  const cookInbox = await call('GET', '/api/notifications', { token: kitchenCook });
+  check(
+    'le cuisinier est prévenu, avec la remarque',
+    cookInbox.body?.items?.some((n: any) => n.kind === 'kitchen.new' && n.body.includes('Sans piment')),
+    cookInbox.body?.items?.map((n: any) => n.body),
+  );
+  const managerKitchenInbox = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant ne reçoit pas chaque ticket',
+    !managerKitchenInbox.body?.items?.some((n: any) => n.kind === 'kitchen.new'),
+    managerKitchenInbox.body?.items?.map((n: any) => n.kind),
+  );
+
+  const kitchen = await call('GET', '/api/kitchen', { token: kitchenCook });
+  const ticketA = kitchen.body?.data?.find((t: any) => t.items.some((i: any) => i.note === 'Sans piment'));
+  check('le ticket est à l’écran cuisine, avec sa table', Boolean(ticketA) && ticketA.title.includes('Monsieur bleu'), kitchen.body);
+  check('sans prix à l’écran cuisine', !JSON.stringify(kitchen.body).includes('25000'), kitchen.body?.data?.[0]);
+  const waiterKitchen = await call('GET', '/api/kitchen', { token: waiter });
+  check('le serveur n’ouvre pas l’écran cuisine (403)', waiterKitchen.status === 403, waiterKitchen.status);
+
+  await call('POST', `/api/kitchen/tickets/${ticketA?.id}/start`, { token: kitchenCook });
+  const riceItem = ticketA?.items?.find((i: any) => i.note === 'Sans piment');
+  const oneReady = await call('POST', `/api/kitchen/tickets/${ticketA?.id}/ready`, { token: kitchenCook, body: { itemId: riceItem?.id } });
+  check(
+    'un plat prêt, le reste encore en préparation',
+    oneReady.body?.data?.find((t: any) => t.id === ticketA?.id)?.status === 'preparing',
+    oneReady.body?.data,
+  );
+  const waiterInbox = await call('GET', '/api/notifications', { token: waiter });
+  check(
+    'le serveur est prévenu que le plat est prêt',
+    waiterInbox.body?.items?.some((n: any) => n.kind === 'kitchen.ready' && n.title.includes('Monsieur bleu')),
+    waiterInbox.body?.items?.map((n: any) => n.title),
+  );
+  const readyPlan = await call('GET', '/api/tables', { token: waiter });
+  check('la table passe « plat prêt »', readyPlan.body?.data?.[0]?.state === 'ready', readyPlan.body?.data?.[0]);
+
+  await call('POST', `/api/kitchen/tickets/${ticketA?.id}/ready`, { token: kitchenCook });
+  const billAfterKitchen = await call('GET', `/api/bills/${billA.body?.id}`, { token: waiter });
+  for (const item of billAfterKitchen.body?.items ?? []) {
+    await call('POST', `/api/bills/items/${item.id}/served`, { token: waiter });
+  }
+
+  const deniedCancel = await call('POST', `/api/bills/items/${billAfterKitchen.body?.items?.[0]?.id}/cancel`, {
+    token: waiter,
+    body: { reason: 'Erreur de saisie' },
+  });
+  check('le serveur n’annule pas un plat envoyé (403)', deniedCancel.status === 403, deniedCancel.status);
+
+  const requested = await call('POST', `/api/bills/${billA.body?.id}/request`, { token: waiter });
+  check('le serveur demande l’addition', requested.body?.status === 'bill_requested', requested.body);
+  const tillInbox = await call('GET', '/api/notifications', { token: till });
+  check(
+    'le caissier est prévenu, avec le montant',
+    tillInbox.body?.items?.some((n: any) => n.kind === 'bill.requested' && n.body.includes('55 000')),
+    tillInbox.body?.items?.map((n: any) => n.body),
+  );
+
+  const toSettle = await call('GET', '/api/bills', { token: till });
+  check(
+    'l’addition demandée passe en tête de la liste du caissier',
+    toSettle.body?.data?.[0]?.id === billA.body?.id,
+    toSettle.body?.data?.map((b: any) => b.status),
+  );
+  const waiterPays = await call('POST', `/api/bills/${billA.body?.id}/pay`, { token: waiter, body: { paymentMethod: 'cash' } });
+  check('le serveur n’encaisse pas (403)', waiterPays.status === 403, waiterPays.status);
+
+  await call('POST', '/api/cash/sessions/open', { token: till, body: { openingFloat: 0 } });
+  const balanceBeforeBill: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  const paid = await call('POST', `/api/bills/${billA.body?.id}/pay`, { token: till, body: { paymentMethod: 'cash' } });
+  check('le caissier encaisse l’addition A', paid.body?.status === 'paid' && Boolean(paid.body?.saleReference), paid.body);
+  const balanceAfterBill: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse augmente de 55 000', balanceAfterBill === balanceBeforeBill + 55000, {
+    avant: balanceBeforeBill,
+    après: balanceAfterBill,
+  });
+  const billSale = await call('GET', `/api/sales/${paid.body?.saleId}`, { token });
+  check(
+    'la vente regroupe les plats et nomme la table',
+    billSale.body?.items?.length === 2 && String(billSale.body?.note).includes('Monsieur bleu'),
+    billSale.body,
+  );
+  const stillBusy = await call('GET', '/api/tables', { token: waiter });
+  check(
+    'la table reste occupée : l’addition B n’est pas payée',
+    stillBusy.body?.data?.[0]?.state !== 'free' && stillBusy.body?.data?.[0]?.bills?.length === 1,
+    stillBusy.body?.data?.[0],
+  );
+
+  // Le gérant annule le plat de l'addition B : la portion revient.
+  const billBNow = await call('GET', `/api/bills/${billB.body?.id}`, { token });
+  const cancelledItem = await call('POST', `/api/bills/items/${billBNow.body?.items?.[0]?.id}/cancel`, {
+    token,
+    body: { reason: 'Client parti' },
+  });
+  const portionsBack = await call('GET', `/api/menu/dishes/${kitchenDish.body?.id}`, { token });
+  check(
+    'le gérant annule un plat : sa portion revient au plat',
+    cancelledItem.body?.items?.[0]?.status === 'cancelled' && portionsBack.body?.availableQuantity === 2,
+    portionsBack.body,
+  );
+  await call('POST', `/api/bills/${billB.body?.id}/cancel`, { token, body: { reason: 'Client parti' } });
+  const freePlan = await call('GET', '/api/tables', { token: waiter });
+  check('toutes les additions closes : la table est libre', freePlan.body?.data?.[0]?.state === 'free', freePlan.body?.data?.[0]);
+
+  // Une commande en ligne acceptée arrive aussi en cuisine.
+  await call('PATCH', '/api/online/settings', { token, body: { enabled: true } });
+  // Un autre client, une autre adresse IP : le limiteur anti-abus compte par client.
+  const webOrder = await call('POST', `/api/public/r/${slug}/orders`, {
+    headers: { 'X-Forwarded-For': '203.0.113.7' },
+    body: {
+      ...orderBody,
+      customerPhone: '621 99 88 77',
+      mode: 'pickup',
+      zoneId: null,
+      items: [{ dishId: drinkDish.body?.id, quantity: 2 }],
+    },
+  });
+  const webOrderId = (await call('GET', '/api/orders?group=active', { token: till })).body?.data?.find(
+    (o: any) => o.trackingCode === webOrder.body?.trackingCode,
+  )?.id;
+  await call('POST', `/api/orders/${webOrderId}/accept`, { token: till });
+  const kitchenOnline = await call('GET', '/api/kitchen', { token: kitchenCook });
+  const onlineTicket = kitchenOnline.body?.data?.find((t: any) => t.source === 'online');
+  check('la commande en ligne acceptée est à l’écran cuisine', Boolean(onlineTicket), kitchenOnline.body?.data);
+  await call('POST', `/api/kitchen/tickets/${onlineTicket?.id}/ready`, { token: kitchenCook });
+  const onlineReady = await call('GET', `/api/orders/${webOrderId}`, { token: till });
+  check('prête en cuisine, elle passe « prête » chez le caissier', onlineReady.body?.status === 'ready', onlineReady.body);
+  await call('POST', `/api/orders/${webOrderId}/cancel`, { token, body: { reason: 'Fin du test' } });
+  await call('PATCH', '/api/online/settings', { token, body: { enabled: false } });
+
+  // Remise en état de la caisse.
+  await call('POST', `/api/sales/${paid.body?.saleId}/cancel`, { token, body: { reason: 'Test salle' } });
+  await call('POST', '/api/cash/sessions/close', { token: till, body: { countedCash: 0, note: 'Fin du test' } });
+  const balanceAfterRoom: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse revient à son état d’avant', balanceAfterRoom === balanceBeforeBill, {
+    avant: balanceBeforeBill,
+    après: balanceAfterRoom,
+  });
+
+  // ---------------------------------------------------------------------
   section('17. Désactivation par le Super Admin (§2.a)');
   const noReason = await call('POST', `/api/super-admin/restaurants/${restaurantId}/disable`, {
     token: superToken,

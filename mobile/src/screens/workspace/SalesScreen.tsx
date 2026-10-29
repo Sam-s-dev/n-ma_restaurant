@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { LayoutChangeEvent } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Icon } from '../../components/Icon';
@@ -10,10 +9,10 @@ import { Field } from '../../components/workspace/Field';
 import { EmptyState, ListRow, RowDivider } from '../../components/workspace/ListRow';
 import { ErrorState, LoadingState } from '../../components/workspace/ScreenState';
 import { Receipt } from '../../components/workspace/Receipt';
-import { Reveal } from '../../components/workspace/Motion';
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
-import { ApiError, mediaUrl, THUMB } from '../../api/client';
+import { DishGrid } from '../../components/workspace/DishGrid';
+import { ApiError } from '../../api/client';
 import { useResource } from '../../api/cache';
 import { createCustomer, listCustomers } from '../../api/workspace/customers';
 import type { Customer } from '../../api/workspace/customers';
@@ -46,8 +45,6 @@ import { radius, screenPadding, shadows, spacing } from '../../theme/layout';
 import { useWorkspace } from './WorkspaceContext';
 
 /** Espace entre deux cartes de plat, repris par le calcul de colonnes. */
-const GRID_GAP = 12;
-
 interface CartLine {
   dish: Dish;
   quantity: number;
@@ -125,20 +122,6 @@ function NewSale() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState<Sale | null>(null);
-  const [cardWidth, setCardWidth] = useState(0);
-
-  /**
-   * Deux colonnes sur un téléphone, davantage sur un écran large : on vise
-   * une carte d'environ 165 points, largeur en dessous de laquelle le nom
-   * d'un plat ne tient plus sur deux lignes.
-   */
-  const measureGrid = useCallback((event: LayoutChangeEvent) => {
-    const width = event.nativeEvent.layout.width;
-    if (width <= 0) return;
-    const columns = Math.max(2, Math.floor(width / 175));
-    setCardWidth(Math.floor((width - GRID_GAP * (columns - 1)) / columns));
-  }, []);
-
   // Carte partagée avec l'écran Menu : une seule clé de cache pour les deux,
   // ce qui rend le passage de l'un à l'autre instantané.
   const menu = useResource<{ categories: Category[]; dishes: Dish[] }>('menu:list', async () => {
@@ -222,90 +205,12 @@ function NewSale() {
           />
         </View>
 
-        {/*
-          Largeur de colonne calculée plutôt que laissée au `flex` : avec
-          `flexGrow`, la dernière carte d'une rangée incomplète s'étirait
-          sur toute la largeur restante et n'avait plus la taille de ses
-          voisines.
-        */}
-        <View style={styles.dishGrid} onLayout={measureGrid}>
-          {visibleDishes.map((dish, position) => {
-            const inCart = cart.find((line) => line.dish.id === dish.id)?.quantity ?? 0;
-
-            return (
-              <Reveal
-                key={dish.id}
-                index={position}
-                style={[styles.dishSlot, cardWidth ? { width: cardWidth } : null]}
-              >
-                <Pressable
-                  onPress={() => dish.isAvailable && addToCart(dish)}
-                  disabled={!dish.isAvailable}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Ajouter ${dish.name}`}
-                  style={({ pressed }) => [
-                    styles.dishCard,
-                    !dish.isAvailable && styles.dishCardOff,
-                    pressed && dish.isAvailable && styles.dishCardPressed,
-                  ]}
-                >
-                  {/*
-                    Cadre au rapport fixe : quelle que soit la photo envoyée
-                    — portrait, panoramique, carrée — elle est recadrée dans
-                    la même vignette, et toutes les cartes s'alignent.
-                  */}
-                  <View style={styles.dishImageFrame}>
-                    {dish.photoMediaId ? (
-                      <Image
-                        source={{ uri: mediaUrl(dish.photoMediaId, THUMB.medium) as string }}
-                        style={styles.dishImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Icon name="menu-book" size={22} color={colors.textTertiary} strokeWidth={1.7} />
-                    )}
-
-                    {inCart > 0 && (
-                      <View style={styles.dishCount}>
-                        <Text style={styles.dishCountText}>{inCart}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Hauteurs réservées : deux lignes de nom, une de
-                      catégorie, une de pied — même si le texte est plus
-                      court, la carte garde la même hauteur. */}
-                  <Text style={styles.dishName} numberOfLines={2}>
-                    {dish.name}
-                  </Text>
-                  <Text style={styles.dishCategory} numberOfLines={1}>
-                    {dish.categoryName ?? 'Sans catégorie'}
-                  </Text>
-                  <Text style={styles.dishPrice} numberOfLines={1}>
-                    {money(dish.price)}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.dishFooter,
-                      !dish.isAvailable && styles.dishFooterOff,
-                      dish.isAvailable &&
-                        dish.availableQuantity !== null &&
-                        dish.availableQuantity <= 3 &&
-                        styles.dishFooterLow,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {!dish.isAvailable
-                      ? 'En rupture'
-                      : dish.availableQuantity !== null
-                        ? `${dish.availableQuantity} portion(s)`
-                        : 'Toujours disponible'}
-                  </Text>
-                </Pressable>
-              </Reveal>
-            );
-          })}
-        </View>
+        <DishGrid
+          dishes={visibleDishes}
+          counts={Object.fromEntries(cart.map((line) => [line.dish.id, line.quantity]))}
+          onAdd={addToCart}
+          money={money}
+        />
 
         {visibleDishes.length === 0 && (
           <Text style={styles.noDish}>Aucun plat dans cette catégorie.</Text>
@@ -1092,103 +997,6 @@ const styles = StyleSheet.create({
   },
   filters: {
     marginBottom: spacing.lg,
-  },
-  dishGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: GRID_GAP,
-  },
-  dishSlot: {
-    // La largeur est fixée à la mesure ; sans elle, rien ne s'affiche
-    // avant le premier calcul.
-    minWidth: 140,
-  },
-  dishCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    ...shadows.soft,
-  },
-  dishCardOff: {
-    opacity: 0.55,
-  },
-  dishCardPressed: {
-    transform: [{ scale: 0.975 }],
-    borderColor: colors.primary,
-  },
-  dishImageFrame: {
-    width: '100%',
-    // Rapport 4:3 : le cadre suit la largeur de la carte, et la photo est
-    // recadrée dedans quelles que soient ses proportions d'origine.
-    aspectRatio: 4 / 3,
-    borderRadius: radius.md,
-    backgroundColor: colors.backgroundAlt,
-    marginBottom: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  dishImage: {
-    width: '100%',
-    height: '100%',
-  },
-  dishFooter: {
-    fontFamily: fontFamily.medium,
-    fontSize: 11,
-    lineHeight: 16,
-    height: 16,
-    color: colors.textTertiary,
-    marginTop: 2,
-  },
-  dishFooterLow: {
-    color: colors.warning,
-  },
-  dishFooterOff: {
-    color: colors.danger,
-  },
-  dishCount: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 6,
-    borderRadius: 11,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dishCountText: {
-    fontFamily: fontFamily.bold,
-    fontSize: 11,
-    lineHeight: 15,
-    color: colors.textOnPrimary,
-  },
-  /* Hauteurs figées : deux lignes de nom réservées même pour un nom court,
-     sans quoi les cartes d'une même rangée ne s'alignent pas. */
-  dishName: {
-    ...typography.bodyStrong,
-    fontSize: 14,
-    lineHeight: 19,
-    height: 38,
-  },
-  dishCategory: {
-    fontFamily: fontFamily.regular,
-    fontSize: 11,
-    lineHeight: 15,
-    height: 15,
-    color: colors.textTertiary,
-    marginTop: 1,
-  },
-  dishPrice: {
-    fontFamily: fontFamily.bold,
-    fontSize: 15,
-    lineHeight: 21,
-    height: 21,
-    color: colors.primary,
-    marginTop: spacing.sm,
   },
   noDish: {
     ...typography.small,

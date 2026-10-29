@@ -7,7 +7,7 @@ import type { Profile } from './auth';
  * faire : masquer un bouton ne protège rien, c'est le serveur qui refuse.
  * La liste de référence est dans backend/src/core/permissions.ts.
  */
-export type Role = 'manager' | 'cashier' | 'storekeeper' | 'driver';
+export type Role = 'manager' | 'cashier' | 'storekeeper' | 'driver' | 'waiter' | 'cook';
 
 export type Permission =
   | 'sales.create'
@@ -31,6 +31,9 @@ export type Permission =
   | 'cash.session'
   | 'orders.manage'
   | 'deliveries.handle'
+  | 'tables.serve'
+  | 'kitchen.handle'
+  | 'bills.settle'
   | 'reports.export'
   | 'cash.manage'
   | 'dashboard.view'
@@ -39,24 +42,29 @@ export type Permission =
   | 'settings.manage'
   | 'audit.view';
 
-export const ROLES: Role[] = ['manager', 'cashier', 'storekeeper', 'driver'];
+export const ROLES: Role[] = ['manager', 'cashier', 'storekeeper', 'driver', 'waiter', 'cook'];
 
 export const ROLE_LABELS: Record<Role, string> = {
   manager: 'Gérant',
   cashier: 'Caissier',
   storekeeper: 'Magasinier',
   driver: 'Livreur',
+  waiter: 'Serveur',
+  cook: 'Cuisinier',
 };
 
 /** Ce que le gérant lit au moment de choisir un rôle. */
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   manager: 'Tout le restaurant : caisse, finances, personnel, équipe et réglages.',
   cashier:
-    'Encaisse les ventes et les commandes en ligne, gère les clients et les remboursements. Ne voit ni la caisse ni les chiffres.',
+    'Encaisse les ventes, les additions des tables et les commandes en ligne, gère les clients et les remboursements. Ne voit ni la caisse ni les chiffres.',
   storekeeper:
     'Tient le stock et voit le solde de la caisse. Demande les achats, qu’il effectue après votre accord.',
   driver:
     'Ne voit que les courses que vous lui confiez : adresse, téléphone du client, montant à encaisser.',
+  waiter:
+    'Prend les commandes à table et les envoie en cuisine, demande l’addition. Ne touche pas à l’argent.',
+  cook: 'L’écran cuisine : prépare les tickets, marque les plats prêts ou épuisés. Ne voit ni la caisse ni les chiffres.',
 };
 
 /**
