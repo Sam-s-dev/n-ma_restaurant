@@ -26,11 +26,32 @@ export const createSaleSchema = z
      */
     customerId: z.string().uuid('Choisissez un client enregistré.').optional(),
     dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    /** Identifiant donné par le téléphone : la même vente ne compte qu'une fois. */
+    clientId: z.string().uuid().optional(),
   })
   .refine((data) => data.paymentMethod !== 'credit' || Boolean(data.customerId), {
     message: 'Une vente à crédit exige un client enregistré.',
     path: ['customerId'],
   });
+
+/** Ventes faites hors connexion, envoyées au retour du réseau. */
+export const syncSalesSchema = z.object({
+  sales: z
+    .array(
+      z.object({
+        clientId: z.string().uuid(),
+        /** Numéro provisoire imprimé sur le ticket (« HL-0003 »). */
+        offlineRef: z.string().trim().max(30),
+        soldAt: z.coerce.date(),
+        items: z.array(saleItemSchema).min(1),
+        paymentMethod: z.enum(PAYMENT_METHODS),
+        customerId: z.string().uuid().optional(),
+        note: z.string().trim().max(400).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
 
 export const listSalesSchema = paginationSchema.merge(dateRangeSchema).extend({
   paymentMethod: z.enum(PAYMENT_METHODS).optional(),
@@ -43,4 +64,5 @@ export const cancelSaleSchema = z.object({
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;
+export type SyncSalesInput = z.infer<typeof syncSalesSchema>;
 export type ListSalesInput = z.infer<typeof listSalesSchema>;

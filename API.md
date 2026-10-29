@@ -341,6 +341,29 @@ Le Super Admin autorise ou retire le mini-site d'un restaurant :
 
 ---
 
+## Ventes hors connexion
+
+Pendant une coupure, le téléphone vend avec la dernière carte connue,
+imprime un ticket au numéro provisoire (`HL-0001`) et garde la vente. Au
+retour du réseau, il l'envoie :
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `POST` | `/api/sales/sync` | `{ sales: [{ clientId, offlineRef, soldAt, items, paymentMethod, customerId?, note? }] }` (100 au plus) |
+
+- Chaque vente porte un `clientId` créé par le téléphone : renvoyée, elle
+  est reconnue (`duplicate`) au lieu d'être comptée deux fois. `POST /api/sales`
+  accepte aussi `clientId`.
+- Réponse par vente : `created` ou `duplicate` (avec `reference`), ou
+  `rejected` avec la raison et `retry` (réessayer plus tard ou non).
+- Acceptée même si le plat est passé en rupture ou si aucune caisse n'est
+  ouverte : le gérant est prévenu (`stock.oversold`,
+  `cash.offline_without_session`). Les portions ne descendent pas sous zéro.
+- Refusée si la date est dans le futur, ou vieille de plus de 3 jours pour
+  qui n'est pas gérant. Le prix de la carte s'applique, sauf pour le gérant.
+
+---
+
 ## Notifications sur le téléphone (Web Push)
 
 Chaque notification de l'application part aussi en message sur les

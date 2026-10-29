@@ -12,6 +12,8 @@ import { Receipt } from '../../components/workspace/Receipt';
 import { Sheet } from '../../components/workspace/Sheet';
 import { Stepper } from '../../components/workspace/Stepper';
 import { DishGrid } from '../../components/workspace/DishGrid';
+import { isNetworkError, newClientId, queueSale } from '../../api/offline';
+import type { OfflineSale } from '../../api/offline';
 import { ApiError } from '../../api/client';
 import { useResource } from '../../api/cache';
 import { createCustomer, listCustomers } from '../../api/workspace/customers';
@@ -309,22 +311,49 @@ function CheckoutSheet({
     setError(null);
     setSaving(true);
 
+    // Le même identifiant sert en ligne et hors ligne : si la réponse se
+    // perd, le renvoi de la vente ne la comptera pas deux fois.
+    const clientId = newClientId();
+    const reset = () => {
+      setCustomer(null);
+      setDueDate('');
+      setNote('');
+      setPayment('cash');
+    };
+
     try {
       const sale = await createSale({
+        clientId,
         items: cart.map((line) => ({ dishId: line.dish.id, quantity: line.quantity })),
         paymentMethod: payment,
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(customer ? { customerId: customer.id } : {}),
         ...(isCredit && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? { dueDate } : {}),
       });
-
-      setCustomer(null);
-      setDueDate('');
-      setNote('');
-      setPayment('cash');
+      reset();
       onDone(sale);
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Enregistrement impossible.');
+      if (!isNetworkError(cause)) {
+        setError(cause instanceof ApiError ? cause.message : 'Enregistrement impossible.');
+        return;
+      }
+      // Pas de réseau : la vente est gardée sur le téléphone et partira seule.
+      const queued = await queueSale({
+        clientId,
+        soldAt: new Date().toISOString(),
+        paymentMethod: payment,
+        items: cart.map((line) => ({
+          dishId: line.dish.id,
+          dishName: line.dish.name,
+          unitPrice: line.dish.price,
+          quantity: line.quantity,
+        })),
+        totalAmount: total,
+        ...(customer ? { customerId: customer.id, customerName: customer.fullName } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      });
+      reset();
+      onDone(offlineAsSale(queued));
     } finally {
       setSaving(false);
     }
@@ -640,6 +669,35 @@ function initialsOf(name: string): string {
     .join('');
 }
 
+/** Une vente gardée sur le téléphone, présentée comme une vente pour son ticket. */
+function offlineAsSale(sale: OfflineSale): Sale {
+  return {
+    id: `offline:${sale.clientId}`,
+    reference: sale.offlineRef,
+    totalAmount: sale.totalAmount,
+    paymentMethod: sale.paymentMethod,
+    status: sale.paymentMethod === 'credit' ? 'credit' : 'paid',
+    customerId: sale.customerId ?? null,
+    customerName: sale.customerName ?? null,
+    customerPhone: null,
+    note: sale.note ?? null,
+    soldAt: sale.soldAt,
+    cancelledAt: null,
+    cancelReason: null,
+    createdByName: null,
+    items: sale.items.map((item, index) => ({
+      id: `${sale.clientId}-${index}`,
+      dishId: item.dishId,
+      dishName: item.dishName,
+      unitPrice: item.unitPrice,
+      quantity: item.quantity,
+      lineTotal: item.unitPrice * item.quantity,
+    })),
+  };
+}
+
+const isOfflineSale = (sale: Sale | null) => Boolean(sale?.id.startsWith('offline:'));
+
 interface ReceiptSheetProps {
   sale: Sale | null;
   onClose: () => void;
@@ -654,6 +712,7 @@ interface ReceiptSheetProps {
  * paramètres du moment.
  */
 function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
+  const { profile } = useWorkspace();
   const [data, setData] = useState<ReceiptData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -663,6 +722,21 @@ function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
       return;
     }
     setError(null);
+    // Hors connexion, le ticket est composé ici, avec le numéro provisoire.
+    if (isOfflineSale(sale)) {
+      setData({
+        restaurant: {
+          name: profile.restaurant.name,
+          address: null,
+          phone: null,
+          logoUrl: null,
+          currencySymbol: profile.restaurant.currencySymbol,
+          currencyDecimals: profile.restaurant.currencyDecimals,
+        },
+        sale,
+      });
+      return;
+    }
     getReceipt(sale.id)
       .then(setData)
       .catch((cause) =>
@@ -722,8 +796,17 @@ function ReceiptSheet({ sale, onClose }: ReceiptSheetProps) {
         <View style={styles.successIcon}>
           <Icon name="check" size={18} color={colors.textOnPrimary} strokeWidth={2.8} />
         </View>
-        <Text style={styles.successText}>Encaissement enregistré</Text>
+        <Text style={styles.successText}>
+          {isOfflineSale(sale) ? 'Vente gardée sur ce téléphone' : 'Encaissement enregistré'}
+        </Text>
       </View>
+
+      {isOfflineSale(sale) && (
+        <Text style={styles.offlineNote}>
+          Hors connexion : le ticket porte un numéro provisoire. La vente partira seule vers la caisse au retour
+          d’internet et recevra son vrai numéro.
+        </Text>
+      )}
 
       {data ? (
         <Receipt data={data} />
@@ -997,6 +1080,11 @@ const styles = StyleSheet.create({
   },
   filters: {
     marginBottom: spacing.lg,
+  },
+  offlineNote: {
+    ...typography.small,
+    color: colors.warning,
+    marginBottom: spacing.md,
   },
   noDish: {
     ...typography.small,

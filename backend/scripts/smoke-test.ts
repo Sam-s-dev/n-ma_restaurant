@@ -2092,6 +2092,87 @@ async function main(): Promise<void> {
   check('pas d’abonnement sur une commande inventée (404)', fakeCodePush.status === 404, fakeCodePush.status);
 
   // ---------------------------------------------------------------------
+  section('16 nonies. Ventes faites hors connexion');
+
+  const offlineDishStock = await call('POST', '/api/menu/dishes', {
+    token,
+    body: { name: `Brochettes ${stamp}`, price: 10000, availableQuantity: 1 },
+  });
+  const balanceBeforeOffline: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const offlineA = { clientId: crypto.randomUUID(), offlineRef: 'HL-0001', soldAt: hourAgo, paymentMethod: 'cash', items: [{ dishId: offlineDishStock.body?.id, quantity: 1 }] };
+  const offlineB = { ...offlineA, clientId: crypto.randomUUID(), offlineRef: 'HL-0002', items: [{ dishId: offlineDishStock.body?.id, quantity: 1, unitPrice: 1 }] };
+  const future = { ...offlineA, clientId: crypto.randomUUID(), offlineRef: 'HL-0003', soldAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString() };
+  const tooOld = { ...offlineA, clientId: crypto.randomUUID(), offlineRef: 'HL-0004', soldAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString() };
+
+  // Caisse fermée : la vente a eu lieu, elle passe quand même.
+  const synced = await call('POST', '/api/sales/sync', { token: till, body: { sales: [offlineA, offlineB, future, tooOld] } });
+  const byClient = (id: string) => synced.body?.results?.find((r: any) => r.clientId === id);
+  check(
+    'les ventes hors ligne arrivent, avec un vrai numéro de ticket',
+    byClient(offlineA.clientId)?.status === 'created' && String(byClient(offlineA.clientId)?.reference).startsWith('V-'),
+    synced.body,
+  );
+  check('même en rupture, la deuxième vente est acceptée', byClient(offlineB.clientId)?.status === 'created', byClient(offlineB.clientId));
+  check('une date dans le futur est refusée', byClient(future.clientId)?.status === 'rejected', byClient(future.clientId));
+  check('plus de 3 jours : le caissier ne peut pas l’envoyer', byClient(tooOld.clientId)?.status === 'rejected', byClient(tooOld.clientId));
+
+  const offlineSale = await call('GET', `/api/sales/${byClient(offlineA.clientId)?.saleId}`, { token });
+  check(
+    'la vente garde son heure réelle et son numéro provisoire',
+    Math.abs(new Date(offlineSale.body?.soldAt).getTime() - new Date(hourAgo).getTime()) < 1000 &&
+      String(offlineSale.body?.note).includes('HL-0001'),
+    offlineSale.body,
+  );
+  const offlinePriced = await call('GET', `/api/sales/${byClient(offlineB.clientId)?.saleId}`, { token });
+  check('le caissier ne change pas un prix, même hors ligne', offlinePriced.body?.totalAmount === 10000, offlinePriced.body);
+
+  const resent = await call('POST', '/api/sales/sync', { token: till, body: { sales: [offlineA] } });
+  check(
+    'renvoyée après une coupure, la vente n’est comptée qu’une fois',
+    resent.body?.results?.[0]?.status === 'duplicate' && resent.body?.results?.[0]?.saleId === byClient(offlineA.clientId)?.saleId,
+    resent.body,
+  );
+  const balanceAfterOffline: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse reçoit les deux ventes, une seule fois', balanceAfterOffline === balanceBeforeOffline + 20000, {
+    avant: balanceBeforeOffline,
+    après: balanceAfterOffline,
+  });
+  const portionsAfterOffline = await call('GET', `/api/menu/dishes/${offlineDishStock.body?.id}`, { token });
+  check('les portions ne passent pas sous zéro', portionsAfterOffline.body?.availableQuantity === 0, portionsAfterOffline.body);
+
+  const offlineInbox = await call('GET', '/api/notifications', { token });
+  check(
+    'le gérant est prévenu des portions dépassées',
+    offlineInbox.body?.items?.some((n: any) => n.kind === 'stock.oversold' && n.body.includes('Brochettes')),
+    offlineInbox.body?.items?.map((n: any) => n.kind),
+  );
+  check(
+    'et des ventes arrivées sans caisse ouverte',
+    offlineInbox.body?.items?.some((n: any) => n.kind === 'cash.offline_without_session'),
+    offlineInbox.body?.items?.map((n: any) => n.kind),
+  );
+
+  const managerOld = await call('POST', '/api/sales/sync', { token, body: { sales: [tooOld] } });
+  check('le gérant, lui, peut envoyer une vente ancienne', managerOld.body?.results?.[0]?.status === 'created', managerOld.body);
+
+  const sameOnline = await call('POST', '/api/sales', {
+    token,
+    body: { clientId: offlineA.clientId, items: [{ dishId: drinkDish.body?.id, quantity: 1 }], paymentMethod: 'cash' },
+  });
+  check('une vente en ligne de même identifiant renvoie la même vente', sameOnline.body?.id === byClient(offlineA.clientId)?.saleId, sameOnline.body);
+
+  // Remise en état.
+  for (const id of [byClient(offlineA.clientId)?.saleId, byClient(offlineB.clientId)?.saleId, managerOld.body?.results?.[0]?.saleId]) {
+    await call('POST', `/api/sales/${id}/cancel`, { token, body: { reason: 'Test hors ligne' } });
+  }
+  const balanceRestored: number = (await call('GET', '/api/cash/balance', { token })).body?.balance;
+  check('la caisse revient à son état d’avant', balanceRestored === balanceBeforeOffline, {
+    avant: balanceBeforeOffline,
+    après: balanceRestored,
+  });
+
+  // ---------------------------------------------------------------------
   section('17. Désactivation par le Super Admin (§2.a)');
   const noReason = await call('POST', `/api/super-admin/restaurants/${restaurantId}/disable`, {
     token: superToken,

@@ -18,6 +18,7 @@ const sell = requirePermission('sales.create');
 
 salesRouter.get('/', sell, asyncHandler(controller.listSales));
 salesRouter.post('/', sell, asyncHandler(controller.createSale));
+salesRouter.post('/sync', sell, audited('sale.offline_synced'), asyncHandler(controller.syncSales));
 salesRouter.get('/:id', sell, asyncHandler(controller.getSale));
 salesRouter.get('/:id/receipt', sell, asyncHandler(controller.getReceipt));
 salesRouter.post(

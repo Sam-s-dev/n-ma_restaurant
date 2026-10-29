@@ -1,5 +1,6 @@
 import { authed } from '../authed';
 import { invalidateCache } from '../cache';
+import { withSnapshot } from '../offline';
 
 export type TableState = 'free' | 'occupied' | 'cooking' | 'ready' | 'bill';
 export type BillStatus = 'open' | 'bill_requested' | 'paid' | 'cancelled';
@@ -105,7 +106,8 @@ export function billName(bill: { tableName?: string; label: string | null; refer
 // --- Plan de salle -------------------------------------------------------------
 
 export async function listTables(all = false): Promise<DiningTable[]> {
-  const result = await authed<{ data: DiningTable[] }>(`/api/tables${all ? '?all=true' : ''}`);
+  const path = `/api/tables${all ? '?all=true' : ''}`;
+  const result = await withSnapshot(`tables:${path}`, () => authed<{ data: DiningTable[] }>(path));
   return result.data;
 }
 

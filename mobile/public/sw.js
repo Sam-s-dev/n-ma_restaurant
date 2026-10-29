@@ -11,7 +11,8 @@
  * de caisse doivent être exacts, pas « les derniers connus ».
  */
 
-const CACHE = 'nma-shell-v2';
+const CACHE = 'nma-shell-v3';
+const MEDIA_CACHE = 'nma-media-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -27,7 +28,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== CACHE && key !== MEDIA_CACHE).map((key) => caches.delete(key))),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -42,7 +45,26 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  // L'API est sur un autre domaine : on ne s'en mêle pas.
+
+  // Photos des plats et logo : une image ne change jamais sous le même
+  // identifiant. Gardées, elles s'affichent aussi pendant une coupure.
+  if (url.pathname.startsWith('/api/media/')) {
+    event.respondWith(
+      caches.open(MEDIA_CACHE).then((cache) =>
+        cache.match(request).then(
+          (cached) =>
+            cached ||
+            fetch(request).then((response) => {
+              if (response.ok || response.type === 'opaque') cache.put(request, response.clone());
+              return response;
+            }),
+        ),
+      ),
+    );
+    return;
+  }
+
+  // Le reste de l'API est sur un autre domaine : on ne s'en mêle pas.
   if (url.origin !== self.location.origin) return;
 
   // Page : réseau d'abord, la dernière version connue si l'on est hors ligne.

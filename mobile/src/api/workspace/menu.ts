@@ -1,4 +1,5 @@
 import { authed, queryString } from '../authed';
+import { withSnapshot } from '../offline';
 import { invalidateCache } from '../cache';
 
 /** §5 — Catégories et plats du menu. */
@@ -38,7 +39,10 @@ export interface DishPayload {
 }
 
 export async function listCategories(): Promise<Category[]> {
-  const { items } = await authed<{ items: Category[] }>('/api/menu/categories');
+  // Gardée sur le téléphone : la carte reste vendable pendant une coupure.
+  const { items } = await withSnapshot('menu:categories', () =>
+    authed<{ items: Category[] }>('/api/menu/categories'),
+  );
   return items;
 }
 
@@ -63,14 +67,13 @@ export function deleteCategory(id: string): Promise<void> {
 export async function listDishes(
   filters: { categoryId?: string; search?: string; onlyAvailable?: boolean } = {},
 ): Promise<Dish[]> {
-  const { items } = await authed<{ items: Dish[] }>(
-    `/api/menu/dishes${queryString({
-      categoryId: filters.categoryId,
-      search: filters.search,
-      // Le backend attend « true » / « false » en chaîne (schéma Zod).
-      onlyAvailable: filters.onlyAvailable ? 'true' : undefined,
-    })}`,
-  );
+  const path = `/api/menu/dishes${queryString({
+    categoryId: filters.categoryId,
+    search: filters.search,
+    // Le backend attend « true » / « false » en chaîne (schéma Zod).
+    onlyAvailable: filters.onlyAvailable ? 'true' : undefined,
+  })}`;
+  const { items } = await withSnapshot(`menu:dishes:${path}`, () => authed<{ items: Dish[] }>(path));
   return items;
 }
 

@@ -91,10 +91,53 @@ const SALE_SELECT = `
  *   • encaissée (espèces / mobile money / carte) → la caisse est créditée ;
  *   • à crédit → une créance est ouverte, la caisse n'est PAS touchée.
  */
+export interface CreateSaleOptions {
+  /**
+   * Vente faite hors connexion : le plat est déjà parti chez le client.
+   * Un plat passé en rupture entre-temps ne la bloque pas, et des portions
+   * vendues deux fois sur deux téléphones sont relevées dans `oversold`
+   * pour prévenir le gérant.
+   */
+  offline?: boolean;
+  oversold?: string[];
+}
+
 export async function createSale(
   restaurantId: string,
   userId: string,
   input: CreateSaleInput,
+  options: CreateSaleOptions = {},
+): Promise<Sale> {
+  // Déjà reçue (réseau instable, envoi répété) : on renvoie la même vente.
+  if (input.clientId) {
+    const existing = await findByClientId(restaurantId, input.clientId);
+    if (existing) return existing;
+  }
+  try {
+    return await insertSale(restaurantId, userId, input, options);
+  } catch (error) {
+    // Deux envois simultanés de la même vente : le second trouve le premier.
+    if ((error as { code?: string }).code === '23505' && input.clientId) {
+      const existing = await findByClientId(restaurantId, input.clientId);
+      if (existing) return existing;
+    }
+    throw error;
+  }
+}
+
+export async function findByClientId(restaurantId: string, clientId: string): Promise<Sale | null> {
+  const row = await queryOne<{ id: string }>(
+    'SELECT id FROM sales WHERE restaurant_id = $1 AND client_id = $2',
+    [restaurantId, clientId],
+  );
+  return row ? loadSale(restaurantId, row.id) : null;
+}
+
+async function insertSale(
+  restaurantId: string,
+  userId: string,
+  input: CreateSaleInput,
+  options: CreateSaleOptions,
 ): Promise<Sale> {
   return withTransaction(async (tx) => {
     // 1. Chargement des plats — un plat d'un autre restaurant est impossible.
@@ -126,6 +169,12 @@ export async function createSale(
     for (const id of dishIds) {
       const dish = byId.get(id);
       if (!dish) throw notFound(`Plat ${id}`);
+      // Hors connexion, le plat est déjà servi : on enregistre ce qui s'est passé.
+      if (options.offline) {
+        const remaining = dish.available_quantity;
+        if (remaining !== null && (requested.get(id) ?? 0) > remaining) options.oversold?.push(dish.name);
+        continue;
+      }
       if (dish.is_archived) throw unprocessable(`Le plat « ${dish.name} » n’est plus au menu.`);
       if (!dish.is_available) {
         throw unprocessable(`Le plat « ${dish.name} » est marqué en rupture.`);
@@ -180,6 +229,8 @@ export async function createSale(
       customerId,
       note: input.note ?? null,
       soldAt,
+      clientId: input.clientId ?? null,
+      offline: options.offline ?? false,
     });
 
     // 5 bis. Décompte des portions (§5). Le plat qui tombe à zéro sort de la
@@ -189,7 +240,7 @@ export async function createSale(
       if (byId.get(dishId)?.available_quantity === null) continue;
       await tx.query(
         `UPDATE dishes
-            SET available_quantity = available_quantity - $1,
+            SET available_quantity = GREATEST(available_quantity - $1, 0),
                 is_available       = (available_quantity - $1) > 0
           WHERE id = $2 AND restaurant_id = $3`,
         [quantity, dishId, restaurantId],
@@ -236,6 +287,8 @@ export async function insertSaleRecord(
     soldAt: Date;
     /** Le serveur de la table, pour les ventes en salle. */
     servedBy?: string | null;
+    clientId?: string | null;
+    offline?: boolean;
   },
 ): Promise<{ id: string; reference: string }> {
   const { restaurantId, userId, lines, totalAmount, paymentMethod, soldAt } = params;
@@ -252,8 +305,8 @@ export async function insertSaleRecord(
   const sale = await tx.queryOne<{ id: string }>(
     `INSERT INTO sales
        (restaurant_id, reference, total_amount, payment_method, status,
-        customer_id, note, sold_at, created_by, served_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        customer_id, note, sold_at, created_by, served_by, client_id, recorded_offline)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id`,
     [
       restaurantId,
@@ -266,6 +319,8 @@ export async function insertSaleRecord(
       soldAt,
       userId,
       params.servedBy ?? null,
+      params.clientId ?? null,
+      params.offline ?? false,
     ],
   );
   if (!sale) throw new Error('Création de la vente impossible.');

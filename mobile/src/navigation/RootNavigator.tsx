@@ -17,6 +17,7 @@ import type { StoredAdminSession } from '../api/adminSession';
 import { PublicSite } from '../screens/public/PublicSite';
 import { currentPublicRoute } from '../utils/publicRoute';
 import { disablePush } from '../utils/push';
+import { clearSnapshots } from '../api/offline';
 import { colors } from '../theme/colors';
 
 export type RootStackParamList = {
@@ -87,6 +88,7 @@ function StaffNavigator({ onReady }: RootNavigatorProps) {
     // Sans cela, les chiffres du restaurant précédent s'afficheraient une
     // fraction de seconde sous le compte suivant.
     invalidateCache();
+    await clearSnapshots();
     await clearSession().catch(() => undefined);
     setProfile(null);
   }, []);

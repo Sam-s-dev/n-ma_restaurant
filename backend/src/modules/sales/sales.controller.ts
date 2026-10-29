@@ -6,7 +6,8 @@ import { parseOrThrow } from '../../core/validate';
 import { can, currentUser } from '../../middlewares/auth';
 import { requireOpenSessionUnlessManager } from '../sessions/sessions.guard';
 import * as service from './sales.service';
-import { cancelSaleSchema, createSaleSchema, listSalesSchema } from './sales.schemas';
+import { cancelSaleSchema, createSaleSchema, listSalesSchema, syncSalesSchema } from './sales.schemas';
+import { syncOfflineSales } from './sales.sync';
 
 const idParam = z.object({ id: z.string().uuid('Identifiant de vente invalide.') });
 
@@ -23,6 +24,27 @@ export async function createSale(req: Request, res: Response) {
   await requireOpenSessionUnlessManager(req, user.restaurantId);
 
   res.status(201).json(await service.createSale(user.restaurantId, user.id, input));
+}
+
+/**
+ * Ventes faites pendant une coupure d'internet. Pas d'exigence de caisse
+ * ouverte : la vente a déjà eu lieu, la refuser la ferait disparaître.
+ */
+export async function syncSales(req: Request, res: Response) {
+  const user = currentUser(req);
+  const input = parseOrThrow(syncSalesSchema, req.body, 'requête');
+  res.json(
+    await syncOfflineSales(
+      {
+        restaurantId: user.restaurantId,
+        userId: user.id,
+        userName: user.fullName,
+        isManager: can(req, 'cash.manage'),
+        canOverridePrice: can(req, 'sales.discount'),
+      },
+      input,
+    ),
+  );
 }
 
 export async function listSales(req: Request, res: Response) {

@@ -50,6 +50,8 @@ import { KitchenScreen } from './KitchenScreen';
 import { BillsScreen } from './BillsScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
 import { PushCard } from '../../components/PushCard';
+import { OfflineBanner } from '../../components/workspace/OfflineBanner';
+import { isNetworkError, markOffline, markOnline, pendingCount, setSnapshotScope, startOffline } from '../../api/offline';
 import { enablePush, onPushNavigate } from '../../utils/push';
 import { readLocal, writeLocal } from '../../utils/publicRoute';
 
@@ -173,6 +175,13 @@ export function WorkspaceScreen({
 
   const money = useCallback((value: number) => formatMoney(value, currency), [currency]);
 
+  // Mode hors connexion : les ventes en attente de ce compte, et les copies
+  // de la carte propres à ce restaurant.
+  useEffect(() => {
+    setSnapshotScope(profile.restaurant.id);
+    return startOffline(profile.user.id);
+  }, [profile.restaurant.id, profile.user.id]);
+
   /**
    * Le résumé sert deux besoins : le solde de l'en-tête et les pastilles
    * d'alerte de la barre d'onglets. Un seul appel pour les deux.
@@ -223,6 +232,8 @@ export function WorkspaceScreen({
           latestSeen.current ? { since: latestSeen.current, limit: 20 } : { limit: 50 },
         );
         if (cancelled) return;
+        // Cet appel régulier sert aussi de témoin : le réseau est revenu.
+        markOnline();
         setUnreadCount(page.unreadCount);
 
         // Une notification déjà vue ne s'annonce jamais deux fois, quoi que
@@ -243,8 +254,9 @@ export function WorkspaceScreen({
           // Un achat approuvé, une vente annulée : le solde a pu bouger.
           refreshBalance();
         }
-      } catch {
+      } catch (error) {
         // Réseau coupé : on réessaiera au prochain passage.
+        if (isNetworkError(error)) markOffline();
       }
     }
 
@@ -402,6 +414,7 @@ export function WorkspaceScreen({
               }
             />
           )}
+          <OfflineBanner money={money} />
         </View>
 
         <View style={styles.body}>
@@ -426,11 +439,17 @@ export function WorkspaceScreen({
         <ConfirmSheet
           visible={logoutOpen}
           title="Se déconnecter"
-          message="Vous retournerez à la page de connexion. Toutes vos données restent enregistrées."
-          confirmLabel="Se déconnecter"
+          message={
+            pendingCount() > 0
+              ? `${pendingCount()} vente(s) faite(s) hors connexion ne sont pas encore envoyées. Attendez le retour d’internet : déconnecté, ce téléphone ne les enverrait qu’à votre prochaine connexion.`
+              : 'Vous retournerez à la page de connexion. Toutes vos données restent enregistrées.'
+          }
+          confirmLabel={pendingCount() > 0 ? 'Compris' : 'Se déconnecter'}
           onCancel={() => setLogoutOpen(false)}
           onConfirm={() => {
             setLogoutOpen(false);
+            // Des ventes encore sur le téléphone : on attend qu'elles soient parties.
+            if (pendingCount() > 0) return;
             onLogout();
           }}
         />

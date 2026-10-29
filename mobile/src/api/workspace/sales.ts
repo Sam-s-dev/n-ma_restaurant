@@ -58,6 +58,8 @@ export interface CreateSalePayload {
    */
   customerId?: string;
   dueDate?: string;
+  /** Créé par le téléphone : renvoyée après une coupure, la vente ne compte qu'une fois. */
+  clientId?: string;
 }
 
 export const PAYMENT_LABELS: Record<string, string> = {
