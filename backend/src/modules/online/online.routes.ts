@@ -37,3 +37,4 @@ publicRouter.get('/r/:slug', readLimit, asyncHandler(controller.publicMenu));
 publicRouter.post('/r/:slug/orders', orderLimit, asyncHandler(controller.placeOrder));
 publicRouter.get('/orders/:code', readLimit, asyncHandler(controller.trackOrder));
 publicRouter.post('/orders/:code/cancel', orderLimit, asyncHandler(controller.cancelTrackedOrder));
+publicRouter.post('/orders/:code/push', readLimit, asyncHandler(controller.subscribeToOrder));

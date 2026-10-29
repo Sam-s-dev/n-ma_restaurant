@@ -14,6 +14,8 @@ import { PAYMENT_LABELS } from '../../api/workspace/orders';
 import { formatDateTime } from '../../utils/date';
 import { formatMoney } from '../../utils/money';
 import { rememberOrder, trackingUrl } from '../../utils/publicRoute';
+import { PushCard } from '../../components/PushCard';
+import { enableOrderPush } from '../../utils/push';
 import { colors } from '../../theme/colors';
 import { fontFamily, typography } from '../../theme/typography';
 import { maxContentWidth, radius, spacing } from '../../theme/layout';
@@ -217,6 +219,13 @@ export function OrderTrackingScreen({ code, onBackToMenu }: OrderTrackingScreenP
           Cette page se met à jour toute seule. Vous la retrouverez en rouvrant le lien du restaurant sur ce
           téléphone ; envoyez-vous le lien pour la retrouver ailleurs.
         </Text>
+      )}
+
+      {!finished && (
+        <PushCard
+          message="Recevez « confirmée », « en route » et « livrée » sur ce téléphone, même la page fermée."
+          onEnable={() => enableOrderPush(code)}
+        />
       )}
 
       <View style={styles.keep}>

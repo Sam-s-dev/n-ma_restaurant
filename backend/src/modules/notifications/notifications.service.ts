@@ -1,6 +1,7 @@
 import { hasPermission, isRole, type Permission, type Role } from '../../core/permissions';
 import { query, queryOne } from '../../db/pool';
 import type { Tx } from '../../db/transaction';
+import { pushToUsers, restaurantName } from '../push/push.service';
 
 export interface Notification {
   id: string;
@@ -103,6 +104,21 @@ export async function notify(params: NotifyParams, tx: Tx = direct): Promise<num
       params.actorName ?? null,
     ],
   );
+
+  // Le même message part sur le téléphone, application fermée — une fois
+  // l'action validée, jamais pour une action finalement annulée.
+  const send = () =>
+    void restaurantName(params.restaurantId).then((name) =>
+      pushToUsers(recipients, {
+        title: `${params.title} · ${name}`,
+        body: params.body ?? '',
+        url: params.route ? `/?route=${params.route}` : '/',
+        tag: `${params.kind}:${params.entityId ?? ''}`,
+      }),
+    );
+  if (tx.afterCommit) tx.afterCommit(send);
+  else send();
+
   return recipients.length;
 }
 

@@ -13,6 +13,7 @@ import { onlineRouter, publicRouter } from '../modules/online/online.routes';
 import { deliveriesRouter, ordersRouter } from '../modules/orders/orders.routes';
 import { kitchenRouter } from '../modules/kitchen/kitchen.routes';
 import { billsRouter, tablesRouter } from '../modules/tables/tables.routes';
+import { pushRouter } from '../modules/push/push.routes';
 import { notificationsRouter } from '../modules/notifications/notifications.routes';
 import { purchasesRouter } from '../modules/purchases/purchases.routes';
 import { restaurantRouter } from '../modules/restaurant/restaurant.routes';
@@ -31,6 +32,7 @@ apiRouter.use('/auth', authRouter);              // §2.b — restaurants
 apiRouter.use('/super-admin', superAdminRouter); // §2.a — éditeur
 apiRouter.use('/media', mediaRouter);            // images (lecture publique)
 apiRouter.use('/public', publicRouter);          // mini-sites des restaurants
+apiRouter.use('/push', pushRouter);              // notifications sur le téléphone
 
 // --- Espace restaurant ---------------------------------------------------
 // `requireUser` injecte le restaurant_id du jeton : chaque module ne voit

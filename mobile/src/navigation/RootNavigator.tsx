@@ -16,6 +16,7 @@ import { clearAdminSession, loadAdminSession } from '../api/adminSession';
 import type { StoredAdminSession } from '../api/adminSession';
 import { PublicSite } from '../screens/public/PublicSite';
 import { currentPublicRoute } from '../utils/publicRoute';
+import { disablePush } from '../utils/push';
 import { colors } from '../theme/colors';
 
 export type RootStackParamList = {
@@ -80,6 +81,8 @@ function StaffNavigator({ onReady }: RootNavigatorProps) {
   }, [restoring, onReady]);
 
   const handleLogout = useCallback(async () => {
+    // Le téléphone ne doit plus recevoir les messages du compte qui part.
+    await disablePush();
     setAuthTokens(null);
     // Sans cela, les chiffres du restaurant précédent s'afficheraient une
     // fraction de seconde sous le compte suivant.

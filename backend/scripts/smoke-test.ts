@@ -2058,6 +2058,34 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
+  section('16 octies. Notifications sur le téléphone');
+
+  const pushKey = await call('GET', '/api/push/key');
+  check('la clé publique est servie, créée au premier démarrage', typeof pushKey.body?.publicKey === 'string' && pushKey.body.publicKey.length > 60, pushKey.body);
+  const pushKeyAgain = await call('GET', '/api/push/key');
+  check('elle reste la même ensuite', pushKeyAgain.body?.publicKey === pushKey.body?.publicKey);
+
+  const fakeSubscription = {
+    endpoint: `https://push.example.invalid/${stamp}`,
+    keys: { p256dh: 'BPcMbnWQL5GOYX0ScBmdmNAtVcHKLtgKbIhLzpMRtPUvFxmWAuEHNOUn9U0iVvEcEPFThtoBWFbXqWGP0_tvXqE', auth: 'Q2g9Tc0bVV-Z_K0ATsBMvw' },
+  };
+  const noAccount = await call('POST', '/api/push/subscribe', { body: fakeSubscription });
+  check('s’abonner exige un compte (401)', noAccount.status === 401, noAccount.status);
+  const subscribed = await call('POST', '/api/push/subscribe', { token: kitchenCook, body: fakeSubscription });
+  check('le cuisinier active les notifications sur son téléphone', subscribed.status === 204, subscribed.body);
+  const badSubscription = await call('POST', '/api/push/subscribe', { token: kitchenCook, body: { endpoint: 'pas-une-adresse' } });
+  check('un abonnement invalide est refusé (400)', badSubscription.status === 400, badSubscription.status);
+  const unsubscribed = await call('POST', '/api/push/unsubscribe', { body: { endpoint: fakeSubscription.endpoint } });
+  check('il se désabonne à la déconnexion', unsubscribed.status === 204, unsubscribed.body);
+
+  const customerPush = await call('POST', `/api/public/orders/${code}/push`, {
+    body: { ...fakeSubscription, endpoint: `${fakeSubscription.endpoint}-client` },
+  });
+  check('le client s’abonne au suivi de sa commande', customerPush.status === 204, customerPush.body);
+  const fakeCodePush = await call('POST', '/api/public/orders/AAAAAAAAAAAA/push', { body: fakeSubscription });
+  check('pas d’abonnement sur une commande inventée (404)', fakeCodePush.status === 404, fakeCodePush.status);
+
+  // ---------------------------------------------------------------------
   section('17. Désactivation par le Super Admin (§2.a)');
   const noReason = await call('POST', `/api/super-admin/restaurants/${restaurantId}/disable`, {
     token: superToken,

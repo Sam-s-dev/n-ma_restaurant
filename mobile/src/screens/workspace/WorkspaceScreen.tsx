@@ -49,6 +49,9 @@ import { TablesScreen } from './TablesScreen';
 import { KitchenScreen } from './KitchenScreen';
 import { BillsScreen } from './BillsScreen';
 import { canOpen, homeRouteFor, tabRoutesFor } from './access';
+import { PushCard } from '../../components/PushCard';
+import { enablePush, onPushNavigate } from '../../utils/push';
+import { readLocal, writeLocal } from '../../utils/publicRoute';
 
 interface WorkspaceScreenProps {
   profile: Profile;
@@ -82,6 +85,14 @@ const TITLES: Record<WorkspaceRoute, string> = {
 
 /** Interrogation des notifications : assez vite pour ressembler à une messagerie. */
 const NOTIFICATION_POLL_MS = 10_000;
+
+const PUSH_DISMISSED_KEY = 'nma.pushPromptDismissed';
+
+/** Écran demandé par un message touché : « /?route=bills ». */
+function routeFromUrl(url: string): WorkspaceRoute | null {
+  const match = /[?&]route=([a-z]+)/.exec(url);
+  return match && match[1] && match[1] in TITLES ? (match[1] as WorkspaceRoute) : null;
+}
 
 const TAB_DEFINITIONS: Record<WorkspaceRoute, Omit<TabDefinition<WorkspaceRoute>, 'key'>> = {
   dashboard: { label: 'Accueil', icon: 'home' },
@@ -138,7 +149,14 @@ export function WorkspaceScreen({
    * retour doit ramener là d'où l'on vient, y compris entre deux onglets.
    * L'accueil est le fond de pile — on ne recule jamais au-delà.
    */
-  const [history, setHistory] = useState<WorkspaceRoute[]>([home]);
+  const [history, setHistory] = useState<WorkspaceRoute[]>(() => {
+    // Ouverte en touchant un message : on arrive directement sur son écran.
+    const fromLink =
+      Platform.OS === 'web' && typeof window !== 'undefined' ? routeFromUrl(window.location.search) : null;
+    if (fromLink && typeof window !== 'undefined') window.history.replaceState(null, '', '/');
+    return fromLink && fromLink !== home ? [home, fromLink] : [home];
+  });
+  const [pushPrompt, setPushPrompt] = useState(() => readLocal(PUSH_DISMISSED_KEY) !== '1');
   const [balance, setBalance] = useState(0);
   const [alerts, setAlerts] = useState({ stock: 0, credits: 0 });
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -288,6 +306,16 @@ export function WorkspaceScreen({
     [home],
   );
 
+  // Message touché alors que l'application était déjà ouverte.
+  useEffect(
+    () =>
+      onPushNavigate((url) => {
+        const target = routeFromUrl(url);
+        if (target) navigate(target);
+      }),
+    [navigate],
+  );
+
   const goBack = useCallback(() => {
     setHistory((current) => (current.length > 1 ? current.slice(0, -1) : current));
   }, []);
@@ -377,6 +405,18 @@ export function WorkspaceScreen({
         </View>
 
         <View style={styles.body}>
+          {route === home && pushPrompt && (
+            <View style={styles.pushPrompt}>
+              <PushCard
+                message="Soyez prévenu sur ce téléphone, même application fermée, comme pour vos messages."
+                onEnable={enablePush}
+                onDismiss={() => {
+                  writeLocal(PUSH_DISMISSED_KEY, '1');
+                  setPushPrompt(false);
+                }}
+              />
+            </View>
+          )}
           <SceneSwitch sceneKey={route}>{renderRoute(route)}</SceneSwitch>
         </View>
 
@@ -459,6 +499,9 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+  },
+  pushPrompt: {
+    paddingHorizontal: screenPadding,
   },
   headerActions: {
     flexDirection: 'row',

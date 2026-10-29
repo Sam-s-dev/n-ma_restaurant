@@ -5,6 +5,7 @@ import { formatAmount, round2 } from '../../utils/money';
 import { resolveOrCreateCustomer } from '../customers/customers.service';
 import { closeOnlineTicket, createOnlineTicket } from '../kitchen/kitchen.service';
 import { notify } from '../notifications/notifications.service';
+import { pushToOrder } from '../push/push.service';
 import { insertSaleRecord, type SaleLine } from '../sales/sales.service';
 
 export type OrderStatus =
@@ -296,6 +297,28 @@ async function lockOrder(tx: Tx, restaurantId: string, orderId: string) {
   return row;
 }
 
+/**
+ * Prévient le client sur son téléphone, s'il l'a demandé depuis sa page de
+ * suivi. Le message part une fois l'étape enregistrée.
+ */
+async function tellCustomer(tx: Tx, orderId: string, title: string, body: string) {
+  const row = await tx.queryOne<{ tracking_code: string; name: string }>(
+    `SELECT o.tracking_code, r.name FROM online_orders o JOIN restaurants r ON r.id = o.restaurant_id
+      WHERE o.id = $1`,
+    [orderId],
+  );
+  if (!row) return;
+  const send = () =>
+    void pushToOrder(orderId, {
+      title: `${title} · ${row.name}`,
+      body,
+      url: `/suivi/${row.tracking_code}`,
+      tag: `order:${orderId}`,
+    });
+  if (tx.afterCommit) tx.afterCommit(send);
+  else send();
+}
+
 function expectStatus(current: OrderStatus, allowed: OrderStatus[], message: string) {
   if (!allowed.includes(current)) throw conflict(message, { status: current });
 }
@@ -373,6 +396,7 @@ export async function acceptOrder(actor: Actor, orderId: string): Promise<Online
     );
     // La cuisine reçoit la commande sur le même écran que les tables.
     await createOnlineTicket(tx, actor.restaurantId, orderId, actor.userId);
+    await tellCustomer(tx, orderId, 'Commande confirmée', 'Le restaurant prépare votre commande.');
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }
@@ -404,6 +428,7 @@ export async function rejectOrder(actor: Actor, orderId: string, reason: string)
         WHERE id = $2`,
       [reason, orderId],
     );
+    await tellCustomer(tx, orderId, 'Commande refusée', reason);
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }
@@ -416,6 +441,9 @@ export async function markReady(actor: Actor, orderId: string): Promise<OnlineOr
       orderId,
     ]);
     await closeOnlineTicket(tx, orderId, 'served');
+    if (order.mode === 'pickup') {
+      await tellCustomer(tx, orderId, 'Votre commande est prête', 'Vous pouvez venir la chercher au restaurant.');
+    }
 
     if (order.driver_id) {
       await notify(
@@ -518,6 +546,7 @@ export async function cancelOrder(actor: Actor, orderId: string, reason: string)
         WHERE id = $2`,
       [reason, orderId],
     );
+    await tellCustomer(tx, orderId, 'Commande annulée', reason);
     if (order.driver_id) {
       await notify(
         {
@@ -698,6 +727,12 @@ export async function dispatchOrder(actor: Actor, orderId: string): Promise<Onli
       [orderId],
     );
     await closeOnlineTicket(tx, orderId, 'served');
+    await tellCustomer(
+      tx,
+      orderId,
+      'Votre commande est en route',
+      `${actor.userName.split(' ')[0]} vous l’apporte. Gardez votre téléphone près de vous.`,
+    );
     return loadOrder(actor.restaurantId, orderId, tx);
   });
 }
@@ -716,6 +751,7 @@ export async function deliverOrder(
         WHERE id = $2`,
       [collectedMethod, orderId],
     );
+    await tellCustomer(tx, orderId, 'Commande livrée', 'Bon appétit, et merci de votre commande !');
 
     const symbol = await currencyOf(tx, actor.restaurantId);
     await notify(

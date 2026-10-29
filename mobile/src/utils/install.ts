@@ -27,7 +27,7 @@ const emit = () => listeners.forEach((listener) => listener());
 
 const isWeb = Platform.OS === 'web' && typeof window !== 'undefined';
 
-function isStandalone(): boolean {
+export function isStandalone(): boolean {
   if (!isWeb) return false;
   return (
     window.matchMedia?.('(display-mode: standalone)').matches === true ||
@@ -35,7 +35,7 @@ function isStandalone(): boolean {
   );
 }
 
-function isIos(): boolean {
+export function isIos(): boolean {
   if (!isWeb) return false;
   const ua = navigator.userAgent;
   // Les iPad récents se présentent comme un Mac : on les reconnaît au tactile.

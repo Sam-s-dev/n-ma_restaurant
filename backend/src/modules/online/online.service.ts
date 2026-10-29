@@ -6,6 +6,7 @@ import { withTransaction } from '../../db/transaction';
 import { formatAmount, round2 } from '../../utils/money';
 import { notify } from '../notifications/notifications.service';
 import { cancelByCustomer, loadOrder, loadOrderByTracking, type OnlineOrder } from '../orders/orders.service';
+import { subscribe, type PushSubscriptionInput } from '../push/push.service';
 import type {
   PlaceOrderInput,
   UpdateOnlineSettingsInput,
@@ -526,6 +527,12 @@ async function restaurantForOrder(restaurantId: string) {
 export async function trackOrder(code: string) {
   const order = await loadOrderByTracking(code);
   return publicOrder(order, await restaurantForOrder(order.restaurantId));
+}
+
+/** Le client demande à être prévenu sur ce téléphone de l'avancée de sa commande. */
+export async function subscribeToOrder(code: string, subscription: PushSubscriptionInput, userAgent: string | null) {
+  const order = await loadOrderByTracking(code);
+  await subscribe({ orderId: order.id }, subscription, userAgent);
 }
 
 export async function cancelTrackedOrder(code: string) {

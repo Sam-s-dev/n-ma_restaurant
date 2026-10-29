@@ -11,7 +11,7 @@
  * de caisse doivent être exacts, pas « les derniers connus ».
  */
 
-const CACHE = 'nma-shell-v1';
+const CACHE = 'nma-shell-v2';
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -75,4 +75,55 @@ self.addEventListener('fetch', (event) => {
       ),
     );
   }
+});
+
+/*
+ * Notifications sur le téléphone, application fermée.
+ *
+ * Le serveur envoie un titre, un texte et la page à ouvrir. Toucher le
+ * message ramène l'application au premier plan sur cette page, ou l'ouvre.
+ */
+self.addEventListener('push', (event) => {
+  let message = { title: 'N’ma Restaurant', body: '', url: '/', tag: undefined };
+  try {
+    message = { ...message, ...event.data.json() };
+  } catch {
+    if (event.data) message.body = event.data.text();
+  }
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      // L'application est à l'écran : elle annonce déjà la notification avec
+      // son propre son. Inutile de la doubler — sauf sur iPhone, où Apple
+      // coupe l'abonnement d'un site qui reçoit un message sans l'afficher.
+      const iphone = /iPhone|iPad|iPod/.test(self.navigator.userAgent);
+      const onScreen = windows.some((client) => client.visibilityState === 'visible' && client.focused);
+      if (onScreen && !iphone) return undefined;
+      return self.registration.showNotification(message.title, {
+        body: message.body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: message.tag,
+        renotify: Boolean(message.tag),
+        data: { url: message.url },
+        vibrate: [120, 60, 120],
+      });
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/', self.location.origin);
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      if (open) {
+        // L'application est déjà ouverte : elle change d'écran sans se recharger.
+        open.postMessage({ type: 'nma:navigate', url: target.pathname + target.search });
+        return open.focus();
+      }
+      return self.clients.openWindow(target.href);
+    }),
+  );
 });

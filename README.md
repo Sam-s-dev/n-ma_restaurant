@@ -9,7 +9,7 @@ l'ordre prévu au §12 : base de données, puis backend, puis conteneur Docker.
 Le design de l'application mobile Expo viendra ensuite, une fois le backend
 stabilisé.
 
-**État : backend complet et fonctionnel.** 337 vérifications de bout en bout
+**État : backend complet et fonctionnel.** 345 vérifications de bout en bout
 passent sur les conteneurs Docker (`npm run smoke`).
 
 ---
@@ -27,7 +27,7 @@ app restaurant/
 │
 ├── database/
 │   ├── README.md                 # schéma et garanties de la base
-│   └── migrations/               # 24 migrations SQL versionnées
+│   └── migrations/               # 25 migrations SQL versionnées
 │
 └── backend/
     ├── scripts/smoke-test.ts     # test de bout en bout

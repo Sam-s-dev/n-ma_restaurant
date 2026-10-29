@@ -341,6 +341,26 @@ Le Super Admin autorise ou retire le mini-site d'un restaurant :
 
 ---
 
+## Notifications sur le téléphone (Web Push)
+
+Chaque notification de l'application part aussi en message sur les
+appareils abonnés, application fermée. Les clés de signature sont créées au
+premier démarrage et gardées en base (`platform_settings`) : rien à
+configurer sur l'hébergement.
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/push/key` | Clé publique pour l'abonnement |
+| `POST` | `/api/push/subscribe` | Abonner l'appareil au compte connecté `{ endpoint, keys }` |
+| `POST` | `/api/push/unsubscribe` | Désabonner l'appareil `{ endpoint }` (déconnexion) |
+| `POST` | `/api/public/orders/:code/push` | Le client suit sa commande sur son téléphone |
+
+Le message part après validation de l'action. Un appareil désabonné (410)
+est retiré au premier envoi refusé. Sur iPhone, seule l'application
+installée sur l'écran d'accueil peut s'abonner (iOS 16.4 et plus).
+
+---
+
 ## Service en salle : tables, additions, cuisine
 
 Une table peut avoir **plusieurs additions** ouvertes (des clients qui ne

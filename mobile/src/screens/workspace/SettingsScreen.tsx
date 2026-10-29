@@ -3,6 +3,8 @@ import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { InstallAppCard } from '../../components/InstallAppCard';
+import { PushCard } from '../../components/PushCard';
+import { enablePush } from '../../utils/push';
 import { Icon } from '../../components/Icon';
 import { Chips, Segmented } from '../../components/workspace/Chips';
 import { ConfirmSheet } from '../../components/workspace/ConfirmSheet';
@@ -285,6 +287,11 @@ export function SettingsScreen() {
           />
         </Card>
 
+        <PushCard
+          message="Commandes, plats prêts, additions, alertes : chaque notification arrive aussi en message, même application fermée."
+          onEnable={enablePush}
+          showWhenOn
+        />
         <InstallAppCard />
 
         <Text style={styles.version}>N’ma Restaurant · version 1.0.0</Text>

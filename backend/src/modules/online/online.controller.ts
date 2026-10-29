@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { parseOrThrow } from '../../core/validate';
 import { currentUser } from '../../middlewares/auth';
+import { agentOf, subscriptionSchema } from '../push/push.routes';
 import * as service from './online.service';
 import {
   placeOrderSchema,
@@ -68,6 +69,13 @@ export async function placeOrder(req: Request, res: Response) {
 export async function trackOrder(req: Request, res: Response) {
   const { code } = parseOrThrow(trackingParam, req.params, 'requête');
   res.json(await service.trackOrder(code));
+}
+
+export async function subscribeToOrder(req: Request, res: Response) {
+  const { code } = parseOrThrow(trackingParam, req.params, 'requête');
+  const subscription = parseOrThrow(subscriptionSchema, req.body, 'requête');
+  await service.subscribeToOrder(code, subscription, agentOf(req));
+  res.status(204).end();
 }
 
 export async function cancelTrackedOrder(req: Request, res: Response) {
